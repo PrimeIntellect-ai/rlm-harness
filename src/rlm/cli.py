@@ -22,6 +22,10 @@ def main():
     parser.add_argument("--model", default=None, help="Model name (overrides RLM_MODEL)")
     parser.add_argument("--max-turns", type=int, default=None, help="Max turns (overrides RLM_MAX_TURNS)")
     parser.add_argument("--tools", default=None, help="Comma-separated tool names (overrides RLM_TOOLS)")
+    parser.add_argument("--replay", nargs="?", const="", default=None,
+                        help="Replay a session (optionally specify session ID)")
+    parser.add_argument("--inspect", action="store_true",
+                        help="Open inspection view (with --replay)")
 
     args, remaining = parser.parse_known_args()
 
@@ -33,7 +37,9 @@ def main():
     if args.tools:
         os.environ["RLM_TOOLS"] = args.tools
 
-    if args.batch:
+    if args.replay is not None:
+        _run_replay(args.replay, inspect=args.inspect)
+    elif args.batch:
         prompts = [args.prompt] + remaining if args.prompt else remaining
         if not prompts:
             parser.error("--batch requires at least one prompt")
@@ -69,9 +75,43 @@ async def _run_batch(prompts: list[str]):
 
 
 def _run_interactive():
-    print("rlm interactive mode")
-    print("TUI not yet implemented. Use: rlm \"your prompt\" for headless mode.")
-    sys.exit(0)
+    from rlm.tui import RLMApp
+    app = RLMApp(mode="interactive")
+    app.run()
+
+
+def _run_replay(session_id: str, inspect: bool = False):
+    from pathlib import Path
+    from rlm.tui import RLMApp, SessionData
+
+    if not session_id:
+        # No ID: show session browser
+        app = RLMApp(mode="browse")
+        app.run()
+        return
+
+    # Find session by ID (prefix match)
+    sessions_dir = Path.home() / ".rlm" / "sessions"
+    session_path = None
+    if (sessions_dir / session_id).is_dir():
+        session_path = sessions_dir / session_id
+    else:
+        # Prefix search
+        for d in sessions_dir.iterdir():
+            if d.is_dir() and d.name.startswith(session_id):
+                session_path = d
+                break
+
+    if session_path is None:
+        print(f"Session not found: {session_id}")
+        sys.exit(1)
+
+    sd = SessionData(path=session_path)
+    sd.load_tree()
+
+    mode = "inspect" if inspect else "replay"
+    app = RLMApp(mode=mode, session_data=sd)
+    app.run()
 
 
 if __name__ == "__main__":

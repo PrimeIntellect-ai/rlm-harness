@@ -7,7 +7,11 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "openai>=1.0",
+    "textual>=1.0",
 ]
+
+[project.optional-dependencies]
+dev = ["textual-dev"]
 
 [project.scripts]
 rlm = "rlm.cli:main"
