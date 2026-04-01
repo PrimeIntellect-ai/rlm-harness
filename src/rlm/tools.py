@@ -179,10 +179,8 @@ def run_edit(
 
 # -- Web search (Serper API) --
 
-_NUM_RESULTS_PER_QUERY = 5
 
-
-def _format_serper_results(data: dict, query: str) -> str:
+def _format_serper_results(data: dict, query: str, num_results: int = 5) -> str:
     """Format a Serper API response into readable text."""
     sections: list[str] = []
 
@@ -202,7 +200,7 @@ def _format_serper_results(data: dict, query: str) -> str:
         if kg_lines:
             sections.append("\n".join(kg_lines))
 
-    for i, result in enumerate((data.get("organic") or [])[:_NUM_RESULTS_PER_QUERY]):
+    for i, result in enumerate((data.get("organic") or [])[:num_results]):
         title = (result.get("title") or "").strip() or "Untitled"
         lines = [f"Result {i}: {title}"]
         link = (result.get("link") or "").strip()
@@ -235,7 +233,7 @@ def _format_serper_results(data: dict, query: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
-def _fetch_serper(query: str, api_key: str, timeout: int = 45) -> str:
+def _fetch_serper(query: str, api_key: str, timeout: int = 45, num_results: int = 5) -> str:
     """Execute a single Serper API search."""
     req = urllib.request.Request(
         "https://google.serper.dev/search",
@@ -253,20 +251,31 @@ def _fetch_serper(query: str, api_key: str, timeout: int = 45) -> str:
         body = e.read().decode() if e.fp else ""
         raise RuntimeError(f"Serper search error ({e.code}): {body}") from e
 
-    return _format_serper_results(data, query)
+    return _format_serper_results(data, query, num_results=num_results)
 
 
-def run_websearch(queries: list[str], *, max_output: int = 8192) -> str:
+def run_websearch(
+    queries: list[str],
+    *,
+    max_output: int = 8192,
+    timeout: int | None = None,
+    num_results: int | None = None,
+) -> str:
     """Run up to 10 Google searches via Serper and return formatted results."""
     api_key = os.environ.get("SERPER_API_KEY", "")
     if not api_key:
         return "Error: SERPER_API_KEY environment variable is not set"
 
+    if timeout is None:
+        timeout = int(os.environ.get("RLM_WEBSEARCH_TIMEOUT", "45"))
+    if num_results is None:
+        num_results = int(os.environ.get("RLM_WEBSEARCH_NUM_RESULTS", "5"))
+
     queries = queries[:10]
     parts: list[str] = []
     for query in queries:
         try:
-            result = _fetch_serper(query, api_key)
+            result = _fetch_serper(query, api_key, timeout=timeout, num_results=num_results)
         except Exception as e:
             result = f"Error searching for '{query}': {e}"
         parts.append(f'Results for query "{query}":\n\n{result}')
