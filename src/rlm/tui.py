@@ -154,6 +154,18 @@ class SessionData:
         return result
 
 
+def _extract_tool_call(tc: dict) -> tuple[str, str]:
+    """Extract (name, args_raw) from a tool call dict.
+
+    Handles both the engine log format {"name": ..., "args": ...}
+    and the OpenAI wire format {"function": {"name": ..., "arguments": ...}}.
+    """
+    if "function" in tc:
+        fn = tc["function"]
+        return fn.get("name", "?"), fn.get("arguments", "")
+    return tc.get("name", "?"), str(tc.get("args", ""))
+
+
 # ──────────────────────────────────────────────
 # SessionPane — RichLog for one session (split-pane view)
 # ──────────────────────────────────────────────
@@ -198,9 +210,7 @@ class SessionPane(RichLog):
 
         if tool_calls:
             for tc in tool_calls:
-                fn = tc.get("function", {})
-                name = fn.get("name", "?")
-                args_raw = fn.get("arguments", "")
+                name, args_raw = _extract_tool_call(tc)
                 if isinstance(args_raw, str) and len(args_raw) > 120:
                     args_raw = args_raw[:120] + "..."
                 line = Text()
@@ -300,12 +310,12 @@ class PaneLayout(Container):
                 self._panes[sd.path.name] = pane
                 self.mount(pane)
             else:
-                col = Vertical()
+                panes = []
                 for sd in sessions:
                     pane = SessionPane(sd, id=f"pane-{sd.path.name}")
                     self._panes[sd.path.name] = pane
-                    col.mount(pane)
-                self.mount(col)
+                    panes.append(pane)
+                self.mount(Vertical(*panes))
 
     def get_pane(self, session_name: str) -> SessionPane | None:
         return self._panes.get(session_name)
@@ -345,9 +355,7 @@ def _build_sections(sd: SessionData) -> list[SectionData]:
                 # Gather following tool_result entries
                 nested: list[SectionData] = []
                 for tc in tool_calls:
-                    fn = tc.get("function", {})
-                    name = fn.get("name", "?")
-                    args_raw = fn.get("arguments", "")
+                    name, args_raw = _extract_tool_call(tc)
                     if isinstance(args_raw, str) and len(args_raw) > 200:
                         args_raw = args_raw[:200] + "..."
 
@@ -845,7 +853,7 @@ class InteractiveView(Screen):
         self._engine: Any = None
         self._poll_timer: Any = None
         self._queued_prompt: str | None = None
-        self._running = False
+        self._engine_running = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -863,7 +871,7 @@ class InteractiveView(Screen):
             return
         event.input.clear()
 
-        if self._running:
+        if self._engine_running:
             self._queued_prompt = prompt
             return
 
@@ -875,12 +883,17 @@ class InteractiveView(Screen):
 
         session = Session()
         self._root_session = SessionData(path=session.dir)
-        self._engine = RLMEngine(session=session)
 
         pane_layout = self.query_one("#panes", PaneLayout)
         pane_layout.rebuild(self._root_session)
 
-        self._running = True
+        try:
+            self._engine = RLMEngine(session=session)
+        except Exception as e:
+            self._show_error(str(e))
+            return
+
+        self._engine_running = True
         self._run_engine_thread(prompt)
         self._poll_timer = self.set_interval(0.3, self._poll_sessions)
 
@@ -947,22 +960,45 @@ class InteractiveView(Screen):
 
     def on_worker_state_changed(self, event) -> None:
         """Called when the engine worker finishes."""
-        if hasattr(event, "worker") and event.worker.is_finished:
-            self._running = False
-            if self._poll_timer is not None:
-                self._poll_timer.stop()
-                self._poll_timer = None
+        if not hasattr(event, "worker") or not event.worker.is_finished:
+            return
 
-            if self._queued_prompt:
-                prompt = self._queued_prompt
-                self._queued_prompt = None
-                self._start_run(prompt)
+        self._engine_running = False
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+            self._poll_timer = None
+
+        # Do one final poll to pick up any remaining entries
+        self._poll_sessions()
+
+        # Show error if the worker failed
+        if event.worker.error is not None:
+            self._show_error(str(event.worker.error))
+            return
+
+        if self._queued_prompt:
+            prompt = self._queued_prompt
+            self._queued_prompt = None
+            self._start_run(prompt)
+
+    def _show_error(self, error_msg: str) -> None:
+        """Display an error message in the current pane or as a notification."""
+        pane_layout = self.query_one("#panes", PaneLayout)
+        root_name = self._root_session.path.name if self._root_session else None
+        pane = pane_layout.get_pane(root_name) if root_name else None
+        if pane is not None:
+            line = Text()
+            line.append(" ERROR ", style="bold reverse red")
+            line.append(f" {error_msg}", style="red")
+            pane.write(line)
+        else:
+            self.notify(f"Error: {error_msg}", severity="error")
 
     def action_abort(self) -> None:
-        if self._running:
+        if self._engine_running:
             for worker in self.workers:
                 worker.cancel()
-            self._running = False
+            self._engine_running = False
             if self._poll_timer is not None:
                 self._poll_timer.stop()
                 self._poll_timer = None
