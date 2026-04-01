@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from pathlib import Path
@@ -12,7 +13,8 @@ class Session:
     def __init__(self, session_dir: Path | None = None):
         if session_dir is None:
             sid = uuid.uuid4().hex[:12]
-            session_dir = Path.home() / ".rlm" / "sessions" / sid
+            rlm_home = Path(os.environ.get("RLM_HOME", Path.home() / ".rlm"))
+            session_dir = rlm_home / "sessions" / sid
         self.dir = Path(session_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self._msg_file = open(self.dir / "messages.jsonl", "a")

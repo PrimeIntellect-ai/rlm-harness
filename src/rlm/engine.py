@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import get_active_tools, run_bash, run_edit
+from rlm.tools import get_active_tools, run_bash, run_edit, run_websearch
 from rlm.types import RLMResult, TokenUsage
 
 
@@ -37,7 +37,7 @@ class RLMEngine:
         if tools is not None:
             self.allowed_tools = tools
         else:
-            self.allowed_tools = os.environ.get("RLM_TOOLS", "bash,edit").split(",")
+            self.allowed_tools = os.environ.get("RLM_TOOLS", "bash,edit,websearch").split(",")
 
         self.client = client or make_client()
         self.session = session
@@ -199,6 +199,11 @@ class RLMEngine:
                 args["old_str"],
                 args["new_str"],
                 cwd=self.cwd,
+            )
+        elif name == "websearch":
+            return run_websearch(
+                args["queries"],
+                max_output=self.max_output,
             )
         else:
             return f"Error: unknown tool '{name}'"

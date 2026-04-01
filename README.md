@@ -2,7 +2,7 @@
 
 A minimalistic CLI agent for true recursion.
 
-Two tools: `bash` and `edit`. Recursion via `bash('rlm "sub-task"')`. That's it.
+Three tools: `bash`, `edit`, and `websearch`. Recursion via `bash('rlm "sub-task"')`. That's it.
 
 ## Install
 
@@ -51,9 +51,13 @@ All via environment variables:
 | `RLM_MAX_DEPTH` | `3` | Max recursion depth |
 | `RLM_BASH_TIMEOUT` | `120` | Seconds per bash command |
 | `RLM_MAX_OUTPUT` | `8192` | Truncate tool output (chars) |
-| `RLM_TOOLS` | `bash,edit` | Active tools (comma-separated) |
+| `RLM_TOOLS` | `bash,edit,websearch` | Active tools (comma-separated) |
 | `RLM_SUB_TOOLS` | — | Tools for children (if different) |
+| `RLM_HOME` | `~/.rlm` | Root directory for sessions and data |
 | `RLM_SYSTEM_PROMPT_VERBOSITY` | `medium` | light / medium / heavy |
+| `SERPER_API_KEY` | — | API key for `websearch` tool ([serper.dev](https://serper.dev)) |
+| `RLM_WEBSEARCH_TIMEOUT` | `45` | Per-query HTTP timeout (seconds) |
+| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results per query |
 
 CLI flags override env vars: `rlm --model opus --max-turns 50 "prompt"`
 
@@ -78,7 +82,7 @@ Each child gets its own session directory nested under the parent's. The root's 
 
 ## Session Directory
 
-Every invocation writes to `~/.rlm/sessions/<id>/`. Nested directories mirror the call tree.
+Every invocation writes to `$RLM_HOME/sessions/<id>/` (default `~/.rlm`). Set `RLM_HOME=.rlm` to keep sessions in the project directory. Nested directories mirror the call tree.
 
 ```
 ~/.rlm/sessions/abc123/
