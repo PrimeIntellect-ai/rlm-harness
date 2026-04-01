@@ -1,0 +1,259 @@
+/* RLM TUI Stylesheet — warm theme, verifiers-inspired */
+
+Screen {
+    layout: vertical;
+    background: $background;
+}
+
+/* --- Shared --- */
+
+Panel {
+    border: round $primary;
+    padding: 1 2;
+    margin: 0 0 1 0;
+    background: $panel;
+}
+
+Label {
+    color: $text;
+}
+
+Static {
+    color: $text;
+}
+
+.title {
+    text-style: bold;
+    color: $text;
+    margin-bottom: 1;
+}
+
+Footer {
+    background: $panel;
+}
+
+/* --- Split-pane view (interactive / replay) --- */
+
+PaneLayout {
+    layout: horizontal;
+    height: 1fr;
+}
+
+PaneLayout > Vertical {
+    width: 1fr;
+}
+
+SessionPane {
+    border: round $primary;
+    height: 1fr;
+    min-height: 5;
+    background: $surface;
+    scrollbar-size-vertical: 2;
+    scrollbar-color: $primary 40%;
+    scrollbar-color-hover: $primary 70%;
+    scrollbar-color-active: $accent;
+    scrollbar-background: $surface;
+}
+
+SessionPane:focus {
+    border: heavy $accent;
+    background-tint: $foreground 4%;
+}
+
+SessionPane.-zoomed {
+    width: 100%;
+    height: 100%;
+}
+
+/* Zoom hides siblings — toggled programmatically via .-hidden */
+SessionPane.-hidden {
+    display: none;
+}
+
+Vertical.-hidden {
+    display: none;
+}
+
+#prompt-input {
+    dock: bottom;
+    height: 3;
+    border: round $secondary;
+    background: $surface;
+}
+
+#prompt-input:focus {
+    border: round $accent;
+}
+
+/* --- Collapsible sections (inspection view) --- */
+
+#inspection-scroll {
+    layout: vertical;
+    height: 1fr;
+    background: $surface;
+    padding: 0 1;
+    scrollbar-size-vertical: 2;
+    scrollbar-color: $primary 40%;
+    scrollbar-color-hover: $primary 70%;
+    scrollbar-color-active: $accent;
+    scrollbar-background: $surface;
+}
+
+.history-section {
+    margin: 0 0 1 0;
+    background: $surface;
+    border: round $secondary;
+}
+
+.history-section:focus-within {
+    background-tint: $foreground 4%;
+}
+
+.history-section > CollapsibleTitle {
+    text-style: bold;
+    padding: 0 1;
+}
+
+.history-section > CollapsibleTitle:hover {
+    background: $primary 12%;
+    color: $text;
+}
+
+.history-section > CollapsibleTitle:focus {
+    background: $primary 28%;
+    color: $text;
+}
+
+.history-section.just-expanded > CollapsibleTitle {
+    background: $primary 18%;
+    color: $text;
+}
+
+.history-section.expand-settle > CollapsibleTitle {
+    background: $primary 10%;
+    color: $text;
+}
+
+/* Section type variants */
+
+.assistant-section {
+    background: $success 6%;
+    border: round $success;
+}
+
+.assistant-section > CollapsibleTitle {
+    color: $success;
+}
+
+.tool-section {
+    background: $warning 6%;
+    border: round $warning;
+}
+
+.tool-section > CollapsibleTitle {
+    color: $warning;
+}
+
+.prompt-section {
+    background: $secondary 4%;
+    border: round $secondary;
+}
+
+.prompt-section > CollapsibleTitle {
+    color: $secondary;
+}
+
+.prompt-section .section-body {
+    color: $text-muted;
+}
+
+.sub-spawn-section {
+    background: $accent 8%;
+    border: round $accent;
+}
+
+.sub-spawn-section > CollapsibleTitle {
+    color: $accent;
+}
+
+.done-section {
+    background: $success 8%;
+    border: round $success;
+}
+
+.done-section > CollapsibleTitle {
+    color: $success;
+}
+
+.nested-section {
+    margin: 0 0 0 1;
+}
+
+.section-body {
+    padding: 0 1 0 1;
+    color: $text;
+}
+
+/* --- Session browser --- */
+
+.browser-panel {
+    height: 1fr;
+    layout: horizontal;
+}
+
+.browser-tree-panel {
+    width: 56;
+    height: 1fr;
+    layout: vertical;
+}
+
+#session-tree {
+    height: 1fr;
+    background: $surface;
+    color: $text;
+    overflow-x: hidden;
+}
+
+#session-tree:focus {
+    background-tint: $foreground 4%;
+}
+
+.browser-details-panel {
+    height: 1fr;
+    width: 1fr;
+}
+
+#browser-details-scroll {
+    padding: 0 1 0 2;
+    height: 1fr;
+    background: $surface;
+    scrollbar-size-vertical: 2;
+    scrollbar-color: $primary 40%;
+    scrollbar-color-hover: $primary 70%;
+    scrollbar-color-active: $accent;
+    scrollbar-background: $surface;
+}
+
+/* --- Metadata panel --- */
+
+.metadata-panel {
+    height: auto;
+    min-height: 3;
+    max-height: 6;
+}
+
+.metadata-layout {
+    height: auto;
+    width: 100%;
+}
+
+#metadata-summary {
+    width: 2fr;
+    padding: 0 1;
+}
+
+#metadata-detail {
+    width: 1fr;
+    padding: 0 1;
+    text-align: left;
+}
