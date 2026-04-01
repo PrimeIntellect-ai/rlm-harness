@@ -1,6 +1,7 @@
 """System prompt construction."""
 
 import os
+from datetime import datetime
 
 
 def build_system_prompt(tools: list[str], cwd: str) -> str:
@@ -32,6 +33,14 @@ def build_system_prompt(tools: list[str], cwd: str) -> str:
         parts.append("### edit")
         parts.append("Replace a unique string in a file. old_str must appear exactly once.")
         parts.append('  edit(path="src/auth.py", old_str="return self._token", new_str="return self._generate_token()")')
+
+    if "websearch" in tools:
+        year = datetime.now().year
+        parts.append("")
+        parts.append("### websearch")
+        parts.append(f"Search Google with up to 10 queries in parallel. Use the current year ({year}) for recent info.")
+        parts.append('  websearch(queries=["python asyncio tutorial", "python subprocess timeout"])')
+        parts.append('  websearch(queries=["latest release notes for library X"])')
 
     # Delegation docs (only if bash is available)
     if "bash" in tools:
