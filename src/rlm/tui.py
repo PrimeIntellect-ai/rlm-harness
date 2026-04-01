@@ -14,6 +14,7 @@ from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.widget import Widget
 from textual.screen import Screen
 from textual.theme import Theme
 from textual.widgets import (
@@ -262,60 +263,55 @@ class SessionPane(RichLog):
 
 
 # ──────────────────────────────────────────────
-# PaneLayout — recursive split-pane columns
+# PaneLayout — recursive nested split panes
 # ──────────────────────────────────────────────
 
 class PaneLayout(Container):
-    """Manages nested split-pane layout by recursive depth."""
+    """Recursive split-pane layout mirroring the session call tree.
+
+    When a session spawns sub-agents, the parent pane and its children
+    sit side-by-side in a Horizontal.  Multiple siblings stack in a
+    Vertical.  This nests recursively so the visual hierarchy matches
+    the agent call tree.
+
+    Use *visible* to control which sessions have panes — only sessions
+    whose path.name is in the set get rendered.  Pass ``None`` to show all.
+    """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._panes: dict[str, SessionPane] = {}
 
-    def rebuild(self, root: SessionData) -> None:
-        """Clear and remount panes to reflect the session tree."""
+    def rebuild(self, root: SessionData, visible: set[str] | None = None) -> None:
+        """Tear down and rebuild the widget tree."""
         self.remove_children()
         self._panes.clear()
-        columns = self._collect_by_depth(root, depth=0)
-        self._mount_columns(columns)
+        tree = self._build_tree(root, visible)
+        if tree is not None:
+            self.mount(tree)
 
-    def _collect_by_depth(
-        self, sd: SessionData, depth: int
-    ) -> dict[int, list[SessionData]]:
-        result: dict[int, list[SessionData]] = {}
-        result.setdefault(depth, []).append(sd)
+    def _build_tree(self, sd: SessionData, visible: set[str] | None) -> Widget | None:
+        if visible is not None and sd.path.name not in visible:
+            return None
+
+        pane = SessionPane(sd, id=f"pane-{sd.path.name}")
+        self._panes[sd.path.name] = pane
+
+        child_widgets: list[Widget] = []
         for child in sd.children.values():
-            child_cols = self._collect_by_depth(child, depth + 1)
-            for d, sessions in child_cols.items():
-                result.setdefault(d, []).extend(sessions)
-        return result
+            w = self._build_tree(child, visible)
+            if w is not None:
+                child_widgets.append(w)
 
-    def _mount_columns(self, columns: dict[int, list[SessionData]]) -> None:
-        max_depth = min(max(columns.keys(), default=0), 2)  # max 3 columns (0,1,2)
+        if not child_widgets:
+            return pane
 
-        if max_depth == 0:
-            # Single pane
-            sd = columns[0][0]
-            pane = SessionPane(sd, id=f"pane-{sd.path.name}")
-            self._panes[sd.path.name] = pane
-            self.mount(pane)
-            return
+        if len(child_widgets) == 1:
+            right = child_widgets[0]
+        else:
+            right = Vertical(*child_widgets, classes="split-stack")
 
-        # Multiple columns
-        for depth in range(max_depth + 1):
-            sessions = columns.get(depth, [])
-            if len(sessions) == 1:
-                sd = sessions[0]
-                pane = SessionPane(sd, id=f"pane-{sd.path.name}")
-                self._panes[sd.path.name] = pane
-                self.mount(pane)
-            else:
-                panes = []
-                for sd in sessions:
-                    pane = SessionPane(sd, id=f"pane-{sd.path.name}")
-                    self._panes[sd.path.name] = pane
-                    panes.append(pane)
-                self.mount(Vertical(*panes))
+        return Horizontal(pane, right, classes="split-row")
 
     def get_pane(self, session_name: str) -> SessionPane | None:
         return self._panes.get(session_name)
@@ -706,13 +702,15 @@ class ReplayView(Screen):
         self.session_data = session_data
         self._flat_entries: list[tuple[str, dict]] = []
         self._cursor: int = 0
+        # Maps session_id -> path.name so we can resolve entries to panes
+        self._name_to_path: dict[str, str] = {}
+        # Which session path.names have panes right now
+        self._visible: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield PaneLayout(id="panes")
 
-        meta = self.session_data.meta
-        turns = meta.get("turns", "?")
         total = len(self.session_data.all_entries_sorted())
         yield Label(
             f" Replay: {self.session_data.path.name}  |  {total} entries  |  j/k step  |  i inspect ",
@@ -722,8 +720,26 @@ class ReplayView(Screen):
 
     def on_mount(self) -> None:
         self._flat_entries = self.session_data.all_entries_sorted()
+        self._index_sessions(self.session_data)
+        # Start with just the root pane
+        root_path = self.session_data.path.name
+        self._visible.add(root_path)
+        self._rebuild()
+
+    def _index_sessions(self, sd: SessionData) -> None:
+        sid = sd.meta.get("session_id", sd.path.name)
+        self._name_to_path[sid] = sd.path.name
+        self._name_to_path[sd.path.name] = sd.path.name
+        for child in sd.children.values():
+            self._index_sessions(child)
+
+    def _resolve(self, session_name: str) -> str | None:
+        """Resolve a session name/id to a path.name."""
+        return self._name_to_path.get(session_name)
+
+    def _rebuild(self) -> None:
         pane_layout = self.query_one("#panes", PaneLayout)
-        pane_layout.rebuild(self.session_data)
+        pane_layout.rebuild(self.session_data, visible=self._visible)
 
     def action_step_forward(self) -> None:
         if self._cursor >= len(self._flat_entries):
@@ -731,14 +747,19 @@ class ReplayView(Screen):
         session_name, entry = self._flat_entries[self._cursor]
         self._cursor += 1
 
+        path_name = self._resolve(session_name)
+        if path_name is None:
+            return
+
+        # If this session isn't visible yet, add it and rebuild
+        if path_name not in self._visible:
+            self._visible.add(path_name)
+            self._rebuild()
+            # Replay all prior entries into the fresh panes
+            self._replay_up_to(self._cursor - 1)
+
         pane_layout = self.query_one("#panes", PaneLayout)
-        pane = pane_layout.get_pane(session_name)
-        if pane is None:
-            # Try matching by path name
-            for name, p in pane_layout._panes.items():
-                if session_name in name or name in session_name:
-                    pane = p
-                    break
+        pane = pane_layout.get_pane(path_name)
         if pane is not None:
             pane.append_entry(entry)
 
@@ -747,21 +768,27 @@ class ReplayView(Screen):
             return
         self._cursor -= 1
 
-        # Rebuild all panes up to cursor
-        pane_layout = self.query_one("#panes", PaneLayout)
-        pane_layout.rebuild(self.session_data)
-
-        # Replay entries up to cursor
+        # Recompute visible set from entries up to cursor
+        self._visible = {self.session_data.path.name}
         for idx in range(self._cursor):
-            session_name, entry = self._flat_entries[idx]
-            pane = pane_layout.get_pane(session_name)
-            if pane is None:
-                for name, p in pane_layout._panes.items():
-                    if session_name in name or name in session_name:
-                        pane = p
-                        break
-            if pane is not None:
-                pane.append_entry(entry)
+            sn, _ = self._flat_entries[idx]
+            pn = self._resolve(sn)
+            if pn:
+                self._visible.add(pn)
+
+        self._rebuild()
+        self._replay_up_to(self._cursor)
+
+    def _replay_up_to(self, end: int) -> None:
+        """Replay entries [0..end) into their panes."""
+        pane_layout = self.query_one("#panes", PaneLayout)
+        for idx in range(end):
+            sn, entry = self._flat_entries[idx]
+            pn = self._resolve(sn)
+            if pn:
+                pane = pane_layout.get_pane(pn)
+                if pane is not None:
+                    pane.append_entry(entry)
 
     def action_inspect(self) -> None:
         self.app.push_screen(InspectionView(self.session_data))
@@ -770,25 +797,23 @@ class ReplayView(Screen):
         focused = self.focused
         if isinstance(focused, SessionPane):
             if focused.has_class("-zoomed"):
-                # Unzoom: show everything
                 focused.remove_class("-zoomed")
-                for pane in self.query(SessionPane):
-                    pane.remove_class("-hidden")
-                for col in self.query("PaneLayout > Vertical"):
-                    col.remove_class("-hidden")
+                for w in self.query(SessionPane):
+                    w.remove_class("-hidden")
+                for w in self.query(".split-row, .split-stack"):
+                    w.remove_class("-hidden")
             else:
-                # Zoom: hide all other panes/columns
-                for pane in self.query(SessionPane):
-                    pane.remove_class("-zoomed")
-                    if pane is not focused:
-                        pane.add_class("-hidden")
+                for w in self.query(SessionPane):
+                    w.remove_class("-zoomed")
+                    if w is not focused:
+                        w.add_class("-hidden")
                     else:
-                        pane.remove_class("-hidden")
-                for col in self.query("PaneLayout > Vertical"):
-                    if focused not in col.query(SessionPane):
-                        col.add_class("-hidden")
+                        w.remove_class("-hidden")
+                for w in self.query(".split-row, .split-stack"):
+                    if focused not in w.query(SessionPane):
+                        w.add_class("-hidden")
                     else:
-                        col.remove_class("-hidden")
+                        w.remove_class("-hidden")
                 focused.add_class("-zoomed")
 
 
@@ -908,55 +933,46 @@ class InteractiveView(Screen):
         new_entries = self._root_session.poll()
         pane_layout = self.query_one("#panes", PaneLayout)
 
-        # Check if tree structure changed (new children)
-        needs_rebuild = self._check_new_children(pane_layout)
-        if needs_rebuild:
-            # Rebuild layout then replay all entries
+        # Check if any new children appeared that need a layout rebuild
+        if self._has_new_children(pane_layout, self._root_session):
             pane_layout.rebuild(self._root_session)
-            self._replay_all(pane_layout)
-        else:
-            # Feed new entries to the root pane
-            root_name = self._root_session.path.name
-            pane = pane_layout.get_pane(root_name)
-            if pane is not None:
-                for entry in new_entries:
-                    pane.append_entry(entry)
+            self._replay_all(pane_layout, self._root_session)
+            return
 
-            # Also poll children and feed their entries
-            self._poll_children(pane_layout, self._root_session)
+        # Feed new entries to the root pane
+        root_name = self._root_session.path.name
+        pane = pane_layout.get_pane(root_name)
+        if pane is not None:
+            for entry in new_entries:
+                pane.append_entry(entry)
 
-    def _check_new_children(self, pane_layout: PaneLayout) -> bool:
-        """Check if any new children appeared that aren't yet in the layout."""
-        def _check(sd: SessionData) -> bool:
-            for child_name in sd.children:
-                if child_name not in pane_layout._panes and sd.children[child_name].path.name not in pane_layout._panes:
-                    return True
-                if _check(sd.children[child_name]):
-                    return True
-            return False
-        return _check(self._root_session) if self._root_session else False
+        # Feed un-rendered entries to child panes
+        self._feed_children(pane_layout, self._root_session)
 
-    def _poll_children(self, pane_layout: PaneLayout, sd: SessionData) -> None:
-        for child_name, child_sd in sd.children.items():
+    def _has_new_children(self, pane_layout: PaneLayout, sd: SessionData) -> bool:
+        for child in sd.children.values():
+            if pane_layout.get_pane(child.path.name) is None:
+                return True
+            if self._has_new_children(pane_layout, child):
+                return True
+        return False
+
+    def _feed_children(self, pane_layout: PaneLayout, sd: SessionData) -> None:
+        for child_sd in sd.children.values():
             pane = pane_layout.get_pane(child_sd.path.name)
             if pane is not None:
-                # Feed any un-rendered entries
                 rendered = pane._entry_count
                 for entry in child_sd.entries[rendered:]:
                     pane.append_entry(entry)
-            self._poll_children(pane_layout, child_sd)
+            self._feed_children(pane_layout, child_sd)
 
-    def _replay_all(self, pane_layout: PaneLayout) -> None:
-        """Replay all entries from the session tree into their panes."""
-        def _replay(sd: SessionData) -> None:
-            pane = pane_layout.get_pane(sd.path.name)
-            if pane is not None:
-                for entry in sd.entries:
-                    pane.append_entry(entry)
-            for child in sd.children.values():
-                _replay(child)
-        if self._root_session:
-            _replay(self._root_session)
+    def _replay_all(self, pane_layout: PaneLayout, sd: SessionData) -> None:
+        pane = pane_layout.get_pane(sd.path.name)
+        if pane is not None:
+            for entry in sd.entries:
+                pane.append_entry(entry)
+        for child in sd.children.values():
+            self._replay_all(pane_layout, child)
 
     def on_worker_state_changed(self, event) -> None:
         """Called when the engine worker finishes."""

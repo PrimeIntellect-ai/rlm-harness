@@ -39,7 +39,15 @@ PaneLayout {
     height: 1fr;
 }
 
-PaneLayout > Vertical {
+.split-row {
+    layout: horizontal;
+    height: 1fr;
+    width: 1fr;
+}
+
+.split-stack {
+    layout: vertical;
+    height: 1fr;
     width: 1fr;
 }
 
