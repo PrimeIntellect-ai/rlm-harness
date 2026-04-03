@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -123,14 +124,19 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls
-            for tc in msg.tool_calls:
-                name = tc.function.name
-                args = json.loads(tc.function.arguments)
+            # Execute tool calls (parallel when multiple)
+            async def _exec_one(tc):
+                n = tc.function.name
+                a = json.loads(tc.function.arguments)
                 t0 = time.time()
-                result = self._execute_tool(name, args)
-                duration = time.time() - t0
+                r = await asyncio.to_thread(self._execute_tool, n, a)
+                return tc, r, time.time() - t0
 
+            tool_results = await asyncio.gather(
+                *[_exec_one(tc) for tc in msg.tool_calls]
+            )
+
+            for tc, result, duration in tool_results:
                 # Append turn/budget info
                 budget_parts = [f"{turn + 1}/{self.max_turns} turns"]
                 if self.max_tokens:
@@ -153,7 +159,7 @@ class RLMEngine:
                     )
                     self._context_warning_sent = True
 
-                self.session.log_tool_result(turn, name, result, duration)
+                self.session.log_tool_result(turn, tc.function.name, result, duration)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
