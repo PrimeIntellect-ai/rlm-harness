@@ -39,6 +39,11 @@ class RLMEngine:
         else:
             self.allowed_tools = os.environ.get("RLM_TOOLS", "bash,edit,websearch").split(",")
 
+        # Context window awareness
+        self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
+        self._context_warning_sent = False
+        self._last_prompt_tokens = 0
+
         self.client = client or make_client()
         self.session = session
         self._total_usage = TokenUsage()
@@ -90,6 +95,7 @@ class RLMEngine:
             usage = extract_usage(response)
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
+            self._last_prompt_tokens = usage.prompt_tokens
 
             msg = response.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
@@ -118,6 +124,20 @@ class RLMEngine:
 
                 # Append turn/budget info
                 result += f"\n[{turn + 1}/{self.max_turns} turns used]"
+
+                # Context window warning (once, at 80%)
+                if (
+                    not self._context_warning_sent
+                    and self._last_prompt_tokens >= self.max_context * 0.80
+                ):
+                    pct = self._last_prompt_tokens / self.max_context
+                    result += (
+                        f"\n\n[CONTEXT LIMIT WARNING] "
+                        f"You have used {self._last_prompt_tokens:,} of "
+                        f"{self.max_context:,} tokens ({pct:.0%}). "
+                        f"Wrap up your task soon."
+                    )
+                    self._context_warning_sent = True
 
                 self.session.log_tool_result(turn, name, result, duration)
                 messages.append({
