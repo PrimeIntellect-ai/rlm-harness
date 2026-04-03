@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -43,6 +44,10 @@ class RLMEngine:
         self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
         self._context_warning_sent = False
         self._last_prompt_tokens = 0
+
+        # Token budget
+        _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
+        self.max_tokens = _max_tok if _max_tok > 0 else None
 
         self.client = client or make_client()
         self.session = session
@@ -109,21 +114,36 @@ class RLMEngine:
                 ]
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
+            # Token budget check
+            if self.max_tokens and self._total_usage.completion_tokens >= self.max_tokens:
+                final_text = msg.content or "[token budget exhausted]"
+                break
+
             # No tool calls → done
             if not msg.tool_calls:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls
-            for tc in msg.tool_calls:
-                name = tc.function.name
-                args = json.loads(tc.function.arguments)
+            # Execute tool calls (parallel when multiple)
+            async def _exec_one(tc):
+                n = tc.function.name
+                a = json.loads(tc.function.arguments)
                 t0 = time.time()
-                result = self._execute_tool(name, args)
-                duration = time.time() - t0
+                r = await asyncio.to_thread(self._execute_tool, n, a)
+                return tc, r, time.time() - t0
 
+            tool_results = await asyncio.gather(
+                *[_exec_one(tc) for tc in msg.tool_calls]
+            )
+
+            for tc, result, duration in tool_results:
                 # Append turn/budget info
-                result += f"\n[{turn + 1}/{self.max_turns} turns used]"
+                budget_parts = [f"{turn + 1}/{self.max_turns} turns"]
+                if self.max_tokens:
+                    budget_parts.append(
+                        f"{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens"
+                    )
+                result += f"\n[{', '.join(budget_parts)} used]"
 
                 # Context window warning (once, at 80%)
                 if (
@@ -139,7 +159,7 @@ class RLMEngine:
                     )
                     self._context_warning_sent = True
 
-                self.session.log_tool_result(turn, name, result, duration)
+                self.session.log_tool_result(turn, tc.function.name, result, duration)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
