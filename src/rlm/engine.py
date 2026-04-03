@@ -44,6 +44,10 @@ class RLMEngine:
         self._context_warning_sent = False
         self._last_prompt_tokens = 0
 
+        # Token budget
+        _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
+        self.max_tokens = _max_tok if _max_tok > 0 else None
+
         self.client = client or make_client()
         self.session = session
         self._total_usage = TokenUsage()
@@ -109,6 +113,11 @@ class RLMEngine:
                 ]
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
+            # Token budget check
+            if self.max_tokens and self._total_usage.completion_tokens >= self.max_tokens:
+                final_text = msg.content or "[token budget exhausted]"
+                break
+
             # No tool calls → done
             if not msg.tool_calls:
                 final_text = msg.content or ""
@@ -123,7 +132,12 @@ class RLMEngine:
                 duration = time.time() - t0
 
                 # Append turn/budget info
-                result += f"\n[{turn + 1}/{self.max_turns} turns used]"
+                budget_parts = [f"{turn + 1}/{self.max_turns} turns"]
+                if self.max_tokens:
+                    budget_parts.append(
+                        f"{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens"
+                    )
+                result += f"\n[{', '.join(budget_parts)} used]"
 
                 # Context window warning (once, at 80%)
                 if (
