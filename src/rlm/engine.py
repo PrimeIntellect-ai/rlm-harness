@@ -137,13 +137,9 @@ class RLMEngine:
             )
 
             for tc, result, duration in tool_results:
-                # Append turn/budget info
-                budget_parts = [f"{turn + 1}/{self.max_turns} turns"]
+                # Append token budget info (only when budget is set)
                 if self.max_tokens:
-                    budget_parts.append(
-                        f"{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens"
-                    )
-                result += f"\n[{', '.join(budget_parts)} used]"
+                    result += f"\n[{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens used]"
 
                 # Context window warning (once, at 80%)
                 if (
