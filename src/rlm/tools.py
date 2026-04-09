@@ -11,6 +11,18 @@ from types import ModuleType
 _SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills"
 
 
+def _parse_skill_md_body(path: Path) -> str:
+    """Read SKILL.md and return the body after the YAML frontmatter."""
+    if not path.exists():
+        return ""
+    text = path.read_text()
+    # Strip --- delimited frontmatter
+    if text.startswith("---"):
+        _, _, body = text.split("---", 2)
+        return body.strip()
+    return text.strip()
+
+
 def _load_skill_module(skill_name: str) -> ModuleType:
     """Dynamically import a skill's scripts package."""
     scripts_dir = _SKILLS_DIR / skill_name / "scripts"
@@ -37,6 +49,11 @@ def _load_skill_module(skill_name: str) -> ModuleType:
     inner_spec.loader.exec_module(inner_mod)
 
     spec.loader.exec_module(mod)
+
+    # Attach prompt from SKILL.md body (everything after the frontmatter)
+    skill_md = _SKILLS_DIR / skill_name / "SKILL.md"
+    inner_mod.PROMPT = _parse_skill_md_body(skill_md)
+
     return inner_mod
 
 

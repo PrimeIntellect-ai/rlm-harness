@@ -84,7 +84,7 @@ class RLMEngine:
         )
 
         active_tools = get_active_tools(self._skills)
-        system_prompt = build_system_prompt(self.allowed_tools, self.cwd)
+        system_prompt = build_system_prompt(self._skills, self.cwd)
 
         messages = [
             {"role": "system", "content": system_prompt},
