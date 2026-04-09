@@ -4,34 +4,22 @@ import json
 import os
 import urllib.error
 import urllib.request
-from datetime import datetime
 
-SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "websearch",
-        "description": (
-            "Search Google via the Serper API. Accepts up to 10 queries in parallel. "
-            "Returns titles, URLs, snippets, and knowledge-graph data. "
-            f"Use the current year ({datetime.now().year}) when searching for recent information."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "queries": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "minItems": 1,
-                    "maxItems": 10,
-                    "description": (
-                        "Google search queries (up to 10). "
-                        "Use multiple queries to search different angles in parallel."
-                    ),
-                }
-            },
-            "required": ["queries"],
-        },
+PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "queries": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 10,
+            "description": (
+                "Google search queries (up to 10). "
+                "Use multiple queries to search different angles in parallel."
+            ),
+        }
     },
+    "required": ["queries"],
 }
 
 

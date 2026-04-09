@@ -10,26 +10,15 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rlm.session import Session
 
-SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "bash",
-        "description": (
-            "Run a shell command and return its output. "
-            "Use for file exploration, running tests, installing packages, "
-            "and invoking `rlm` for sub-tasks."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute.",
-                }
-            },
-            "required": ["command"],
-        },
+PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "command": {
+            "type": "string",
+            "description": "The shell command to execute.",
+        }
     },
+    "required": ["command"],
 }
 
 _RLM_CMD_RE = re.compile(r"\brlm\s")

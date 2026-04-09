@@ -11,16 +11,21 @@ from types import ModuleType
 _SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills"
 
 
-def _parse_skill_md_body(path: Path) -> str:
-    """Read SKILL.md and return the body after the YAML frontmatter."""
+def _parse_skill_md(path: Path) -> tuple[dict[str, str], str]:
+    """Read SKILL.md and return (frontmatter dict, body text)."""
     if not path.exists():
-        return ""
+        return {}, ""
     text = path.read_text()
-    # Strip --- delimited frontmatter
     if text.startswith("---"):
-        _, _, body = text.split("---", 2)
-        return body.strip()
-    return text.strip()
+        _, fm_raw, body = text.split("---", 2)
+        # Simple key: value parser — no YAML dependency needed
+        meta = {}
+        for line in fm_raw.strip().splitlines():
+            if ":" in line:
+                key, _, value = line.partition(":")
+                meta[key.strip()] = value.strip()
+        return meta, body.strip()
+    return {}, text.strip()
 
 
 def _load_skill_module(skill_name: str) -> ModuleType:
@@ -50,9 +55,20 @@ def _load_skill_module(skill_name: str) -> ModuleType:
 
     spec.loader.exec_module(mod)
 
-    # Attach prompt from SKILL.md body (everything after the frontmatter)
+    # Read SKILL.md: frontmatter provides name/description, body provides prompt
     skill_md = _SKILLS_DIR / skill_name / "SKILL.md"
-    inner_mod.PROMPT = _parse_skill_md_body(skill_md)
+    meta, body = _parse_skill_md(skill_md)
+    inner_mod.PROMPT = body
+
+    # Build full OpenAI schema from frontmatter + PARAMETERS from the module
+    inner_mod.SCHEMA = {
+        "type": "function",
+        "function": {
+            "name": meta.get("name", skill_name),
+            "description": meta.get("description", ""),
+            "parameters": inner_mod.PARAMETERS,
+        },
+    }
 
     return inner_mod
 

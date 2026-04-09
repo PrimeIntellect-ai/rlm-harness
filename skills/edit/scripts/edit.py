@@ -2,27 +2,17 @@
 
 from pathlib import Path
 
-SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "edit",
-        "description": (
-            "Replace a unique string in a file. "
-            "old_str must appear exactly once in the file."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "File path to edit."},
-                "old_str": {
-                    "type": "string",
-                    "description": "The exact string to find (must be unique).",
-                },
-                "new_str": {"type": "string", "description": "The replacement string."},
-            },
-            "required": ["path", "old_str", "new_str"],
+PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string", "description": "File path to edit."},
+        "old_str": {
+            "type": "string",
+            "description": "The exact string to find (must be unique).",
         },
+        "new_str": {"type": "string", "description": "The replacement string."},
     },
+    "required": ["path", "old_str", "new_str"],
 }
 
 
