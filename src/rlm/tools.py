@@ -7,8 +7,22 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-# skills/ lives at the repo root, two levels up from src/rlm/
-_SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills"
+
+def _find_skills_dir() -> Path:
+    """Locate the skills/ directory. Works for both editable and installed layouts."""
+    base = Path(__file__).resolve().parent
+    # Editable install: src/rlm/tools.py → ../../skills
+    candidate = base.parent.parent / "skills"
+    if candidate.is_dir():
+        return candidate
+    # Installed wheel: site-packages/rlm/tools.py → ../skills
+    candidate = base.parent / "skills"
+    if candidate.is_dir():
+        return candidate
+    raise FileNotFoundError("Could not find skills/ directory")
+
+
+_SKILLS_DIR = _find_skills_dir()
 
 
 def _parse_skill_md(path: Path) -> tuple[dict[str, str], str]:
