@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import os
-from types import ModuleType
 
 
-def build_system_prompt(skills: dict[str, ModuleType], cwd: str) -> str:
-    """Build system prompt from loaded skill modules."""
+def build_system_prompt(cwd: str) -> str:
+    """Build the system prompt."""
     verbosity = os.environ.get("RLM_SYSTEM_PROMPT_VERBOSITY", "medium")
 
     parts = [
@@ -17,16 +16,6 @@ def build_system_prompt(skills: dict[str, ModuleType], cwd: str) -> str:
         "When you are done, stop calling tools and state your final answer.",
         f"Working directory: {cwd}",
     ]
-
-    # Tool docs — collected from each skill's SKILL.md body
-    parts.append("")
-    parts.append("## Available tools")
-
-    for name, skill in skills.items():
-        prompt = getattr(skill, "PROMPT", "")
-        if prompt:
-            parts.append("")
-            parts.append(prompt)
 
     if verbosity == "heavy":
         parts.append("")
