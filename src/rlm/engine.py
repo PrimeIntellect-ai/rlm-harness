@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import get_active_tools, run_bash, run_edit, run_websearch
+from rlm.tools import get_active_tools, load_skills
 from rlm.types import RLMResult, TokenUsage
 
 
@@ -38,7 +38,9 @@ class RLMEngine:
         if tools is not None:
             self.allowed_tools = tools
         else:
-            self.allowed_tools = os.environ.get("RLM_TOOLS", "bash,edit,websearch").split(",")
+            self.allowed_tools = os.environ.get(
+                "RLM_TOOLS", "bash,edit,websearch"
+            ).split(",")
 
         # Context window awareness
         self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
@@ -52,6 +54,9 @@ class RLMEngine:
         self.client = client or make_client()
         self.session = session
         self._total_usage = TokenUsage()
+
+        # Load skill modules
+        self._skills = load_skills(self.allowed_tools)
 
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
@@ -78,7 +83,7 @@ class RLMEngine:
             tools=self.allowed_tools,
         )
 
-        active_tools = get_active_tools(self.allowed_tools)
+        active_tools = get_active_tools(self._skills)
         system_prompt = build_system_prompt(self.allowed_tools, self.cwd)
 
         messages = [
@@ -109,13 +114,19 @@ class RLMEngine:
             tool_calls_log = None
             if msg.tool_calls:
                 tool_calls_log = [
-                    {"name": tc.function.name, "args": json.loads(tc.function.arguments)}
+                    {
+                        "name": tc.function.name,
+                        "args": json.loads(tc.function.arguments),
+                    }
                     for tc in msg.tool_calls
                 ]
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             # Token budget check
-            if self.max_tokens and self._total_usage.completion_tokens >= self.max_tokens:
+            if (
+                self.max_tokens
+                and self._total_usage.completion_tokens >= self.max_tokens
+            ):
                 final_text = msg.content or "[token budget exhausted]"
                 break
 
@@ -156,11 +167,13 @@ class RLMEngine:
                     self._context_warning_sent = True
 
                 self.session.log_tool_result(turn, tc.function.name, result, duration)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    }
+                )
         else:
             # Max turns exhausted
             final_text = msg.content or "[max turns reached]"
@@ -173,7 +186,10 @@ class RLMEngine:
         )
         self.session.finalize(
             final_text,
-            usage={"prompt_tokens": self._total_usage.prompt_tokens, "completion_tokens": self._total_usage.completion_tokens},
+            usage={
+                "prompt_tokens": self._total_usage.prompt_tokens,
+                "completion_tokens": self._total_usage.completion_tokens,
+            },
             turns=turn + 1,
         )
         return result
@@ -193,7 +209,8 @@ class RLMEngine:
                 env["RLM_TOOLS"] = sub_tools
 
             proc = await asyncio.create_subprocess_exec(
-                "rlm", prompt,
+                "rlm",
+                prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
@@ -216,30 +233,24 @@ class RLMEngine:
                     )
                     turns = meta.get("turns", 0)
 
-            return RLMResult(answer=answer, session_dir=child_dir, usage=usage, turns=turns)
+            return RLMResult(
+                answer=answer, session_dir=child_dir, usage=usage, turns=turns
+            )
 
         return await asyncio.gather(*[_run_one(p) for p in prompts])
 
     def _execute_tool(self, name: str, args: dict) -> str:
-        if name == "bash":
-            return run_bash(
-                args["command"],
-                cwd=self.cwd,
-                session=self.session,
-                timeout=self.bash_timeout,
-                max_output=self.max_output,
-            )
-        elif name == "edit":
-            return run_edit(
-                args["path"],
-                args["old_str"],
-                args["new_str"],
-                cwd=self.cwd,
-            )
-        elif name == "websearch":
-            return run_websearch(
-                args["queries"],
-                max_output=self.max_output,
-            )
-        else:
+        skill = self._skills.get(name)
+        if skill is None:
             return f"Error: unknown tool '{name}'"
+
+        ctx = {
+            "cwd": self.cwd,
+            "session": self.session,
+            "timeout": self.bash_timeout,
+            "max_output": self.max_output,
+        }
+        try:
+            return skill.run(**args, **ctx)
+        except Exception as e:
+            return f"Error running {name}: {e}"

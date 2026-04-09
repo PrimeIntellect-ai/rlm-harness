@@ -31,15 +31,23 @@ def build_system_prompt(tools: list[str], cwd: str) -> str:
     if "edit" in tools:
         parts.append("")
         parts.append("### edit")
-        parts.append("Replace a unique string in a file. old_str must appear exactly once.")
-        parts.append('  edit(path="src/auth.py", old_str="return self._token", new_str="return self._generate_token()")')
+        parts.append(
+            "Replace a unique string in a file. old_str must appear exactly once."
+        )
+        parts.append(
+            '  edit(path="src/auth.py", old_str="return self._token", new_str="return self._generate_token()")'
+        )
 
     if "websearch" in tools:
         year = datetime.now().year
         parts.append("")
         parts.append("### websearch")
-        parts.append(f"Search Google with up to 10 queries in parallel. Use the current year ({year}) for recent info.")
-        parts.append('  websearch(queries=["python asyncio tutorial", "python subprocess timeout"])')
+        parts.append(
+            f"Search Google with up to 10 queries in parallel. Use the current year ({year}) for recent info."
+        )
+        parts.append(
+            '  websearch(queries=["python asyncio tutorial", "python subprocess timeout"])'
+        )
         parts.append('  websearch(queries=["latest release notes for library X"])')
 
     # Delegation docs (only if bash is available)
@@ -47,23 +55,33 @@ def build_system_prompt(tools: list[str], cwd: str) -> str:
         parts.append("")
         parts.append("## Sub-agent delegation")
         parts.append("")
-        parts.append("For complex tasks, you can delegate sub-tasks to child agents by invoking `rlm` via bash:")
+        parts.append(
+            "For complex tasks, you can delegate sub-tasks to child agents by invoking `rlm` via bash:"
+        )
         parts.append("")
         parts.append("Single sub-task:")
-        parts.append('  bash(command=\'rlm "check auth.py for security issues"\')')
+        parts.append("  bash(command='rlm \"check auth.py for security issues\"')")
         parts.append("")
         parts.append("Parallel sub-tasks:")
-        parts.append('  bash(command=\'rlm --batch "check auth.py" "check login.py" "check session.py"\')')
+        parts.append(
+            '  bash(command=\'rlm --batch "check auth.py" "check login.py" "check session.py"\')'
+        )
         parts.append("")
-        parts.append("Each child agent has the same capabilities as you. Use delegation when:")
+        parts.append(
+            "Each child agent has the same capabilities as you. Use delegation when:"
+        )
         parts.append("- Sub-tasks are independent and can run in parallel")
         parts.append("- You want to give a focused task a fresh context window")
 
     if verbosity == "heavy":
         parts.append("")
         parts.append("## Important guidelines")
-        parts.append("- NEVER claim you are done until you have seen tool output confirming success")
-        parts.append("- Make small, incremental tool calls — don't try to do everything at once")
+        parts.append(
+            "- NEVER claim you are done until you have seen tool output confirming success"
+        )
+        parts.append(
+            "- Make small, incremental tool calls — don't try to do everything at once"
+        )
         parts.append("- If a command fails, read the error and adjust your approach")
         parts.append("- For large outputs, use grep/head/tail to focus on what matters")
 

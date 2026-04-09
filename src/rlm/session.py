@@ -38,7 +38,9 @@ class Session:
         self._msg_file.write(json.dumps(entry, default=str) + "\n")
         self._msg_file.flush()
 
-    def log_assistant(self, turn: int, tool_calls: list[dict] | None, content: str | None):
+    def log_assistant(
+        self, turn: int, tool_calls: list[dict] | None, content: str | None
+    ):
         entry = {"type": "assistant", "turn": turn}
         if tool_calls:
             entry["tool_calls"] = tool_calls
@@ -47,13 +49,15 @@ class Session:
         self.log(entry)
 
     def log_tool_result(self, turn: int, tool: str, content: str, duration: float):
-        self.log({
-            "type": "tool_result",
-            "turn": turn,
-            "tool": tool,
-            "content": content[:2000],  # cap for readability
-            "duration": round(duration, 3),
-        })
+        self.log(
+            {
+                "type": "tool_result",
+                "turn": turn,
+                "tool": tool,
+                "content": content[:2000],  # cap for readability
+                "duration": round(duration, 3),
+            }
+        )
 
     def log_sub_spawn(self, child_name: str, command: str):
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})

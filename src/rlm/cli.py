@@ -17,11 +17,27 @@ def main():
         prog="rlm",
         description="A minimalistic CLI agent for true recursion.",
     )
-    parser.add_argument("prompt", nargs="?", default=None, help="Task prompt (omit for interactive mode)")
-    parser.add_argument("--batch", action="store_true", help="Run multiple prompts in parallel")
-    parser.add_argument("--model", default=None, help="Model name (overrides RLM_MODEL)")
-    parser.add_argument("--max-turns", type=int, default=None, help="Max turns (overrides RLM_MAX_TURNS)")
-    parser.add_argument("--tools", default=None, help="Comma-separated tool names (overrides RLM_TOOLS)")
+    parser.add_argument(
+        "prompt",
+        nargs="?",
+        default=None,
+        help="Task prompt (omit for interactive mode)",
+    )
+    parser.add_argument(
+        "--batch", action="store_true", help="Run multiple prompts in parallel"
+    )
+    parser.add_argument(
+        "--model", default=None, help="Model name (overrides RLM_MODEL)"
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        help="Max turns (overrides RLM_MAX_TURNS)",
+    )
+    parser.add_argument(
+        "--tools", default=None, help="Comma-separated tool names (overrides RLM_TOOLS)"
+    )
 
     args, remaining = parser.parse_known_args()
 
@@ -70,7 +86,7 @@ async def _run_batch(prompts: list[str]):
 
 def _run_interactive():
     print("rlm interactive mode")
-    print("TUI not yet implemented. Use: rlm \"your prompt\" for headless mode.")
+    print('TUI not yet implemented. Use: rlm "your prompt" for headless mode.')
     sys.exit(0)
 
 
