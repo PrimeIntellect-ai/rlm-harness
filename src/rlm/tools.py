@@ -28,6 +28,9 @@ def _find_skills_dir() -> Path:
 
 SKILLS_DIR = _find_skills_dir()
 
+# -- Non-programmatic tool schemas --
+
+
 BASH_SCHEMA = {
     "type": "function",
     "function": {
@@ -103,6 +106,35 @@ def run_bash(
     return output
 
 
+# Handled specially in the engine — mutates the messages list instead of
+# returning output from a subprocess.
+SUMMARIZE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "summarize",
+        "description": (
+            "Summarize and drop old turns from context to free up space. "
+            "A turn is one assistant response plus all its tool results. "
+            "Dropping num_turns removes the oldest complete turns from context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "num_turns": {
+                    "type": "integer",
+                    "description": "Number of oldest turns to drop from context.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Your summary of the content being dropped.",
+                },
+            },
+            "required": ["num_turns", "summary"],
+        },
+    },
+}
+
+
 def get_active_tools() -> list[dict]:
     """Return OpenAI tool schemas for non-programmatic tools."""
-    return [BASH_SCHEMA]
+    return [BASH_SCHEMA, SUMMARIZE_SCHEMA]

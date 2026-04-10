@@ -46,6 +46,10 @@ class RLMEngine:
         self.session = session
         self._total_usage = TokenUsage()
 
+        # Summarize tool state
+        self._summaries: list[str] = []
+        self._dropped_turn_count: int = 0
+
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
         # Check depth limit
@@ -124,12 +128,21 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls (parallel when multiple)
+            # Execute tool calls (parallel when multiple).
+            # Summarize is handled inline — it's pure string ops and needs
+            # to read/write engine state (_summaries, _dropped_turn_count).
+            # After all results are appended, we drop old messages if
+            # summarize was called.
+            summarize_num_turns = 0
+
             async def _exec_one(tc):
                 n = tc.function.name
                 a = json.loads(tc.function.arguments)
                 t0 = time.time()
-                r = await asyncio.to_thread(self._execute_tool, n, a)
+                if n == "summarize":
+                    r = self._execute_summarize(a, messages)
+                else:
+                    r = await asyncio.to_thread(self._execute_tool, n, a)
                 return tc, r, time.time() - t0
 
             tool_results = await asyncio.gather(
@@ -137,6 +150,12 @@ class RLMEngine:
             )
 
             for tc, result, duration in tool_results:
+                # Track if summarize was called (for post-processing)
+                if tc.function.name == "summarize" and not result.startswith("[no-op]"):
+                    summarize_num_turns = json.loads(tc.function.arguments).get(
+                        "num_turns", 0
+                    )
+
                 # Append token budget info (only when budget is set)
                 if self.max_tokens:
                     result += f"\n[{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens used]"
@@ -163,6 +182,13 @@ class RLMEngine:
                         "content": result,
                     }
                 )
+
+            # Drop old turn-groups from messages after summarize.
+            # A turn-group = one assistant message + its following tool messages.
+            # We never drop system prompt (messages[0]), user message ([1]),
+            # or the current turn (last assistant + its tool results).
+            if summarize_num_turns > 0:
+                self._drop_turns(messages, summarize_num_turns)
         else:
             # Max turns exhausted
             final_text = msg.content or "[max turns reached]"
@@ -224,6 +250,55 @@ class RLMEngine:
             )
 
         return await asyncio.gather(*[_run_one(p) for p in prompts])
+
+    def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
+        """Handle the summarize tool. Returns the accumulated summaries or an error.
+
+        Validation only — actual message dropping happens after all tool results
+        are appended (see _drop_turns).
+        """
+        num_turns = args.get("num_turns", 0)
+        summary = args.get("summary", "")
+
+        # Count droppable turns: assistant messages in messages[2:] minus the
+        # current turn (the last assistant message, which has the summarize call).
+        droppable = sum(1 for m in messages[2:] if m["role"] == "assistant") - 1
+
+        if num_turns <= 0:
+            return f"[no-op] num_turns must be > 0 (got {num_turns}). No context was dropped."
+        if num_turns > droppable:
+            return (
+                f"[no-op] num_turns={num_turns} exceeds droppable turns "
+                f"({droppable}). No context was dropped."
+            )
+
+        start = self._dropped_turn_count
+        end = start + num_turns - 1
+        self._summaries.append(f"[turns {start}-{end}] {summary}")
+        self._dropped_turn_count += num_turns
+        return "\n\n".join(self._summaries)
+
+    @staticmethod
+    def _drop_turns(messages: list[dict], num_turns: int) -> None:
+        """Remove the first num_turns turn-groups from messages[2:] in place.
+
+        A turn-group starts at an assistant message and includes all following
+        tool messages up to (but not including) the next assistant message.
+        """
+        dropped = 0
+        end = 2  # start scanning after system + user
+        while end < len(messages) and dropped < num_turns:
+            if messages[end]["role"] == "assistant":
+                dropped += 1
+                if dropped > num_turns:
+                    break
+                end += 1
+                # consume following tool messages
+                while end < len(messages) and messages[end]["role"] == "tool":
+                    end += 1
+            else:
+                end += 1
+        del messages[2:end]
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "bash":
