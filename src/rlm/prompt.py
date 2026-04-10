@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 
-def build_system_prompt(cwd: str, skills_dir: str) -> str:
+def build_system_prompt(cwd: str, skills_dir: str, messages_path: str) -> str:
     """Build the system prompt."""
     verbosity = os.environ.get("RLM_SYSTEM_PROMPT_VERBOSITY", "medium")
 
@@ -18,6 +18,8 @@ def build_system_prompt(cwd: str, skills_dir: str) -> str:
         "",
         f"Programmatic tools are available as Python modules in {skills_dir}.",
         "Each subdirectory is a tool. Run with --help to see usage.",
+        "",
+        f"Your conversation is logged to {messages_path}.",
     ]
 
     if verbosity == "heavy":

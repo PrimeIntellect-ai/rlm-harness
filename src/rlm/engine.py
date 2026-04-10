@@ -75,7 +75,8 @@ class RLMEngine:
         )
 
         active_tools = get_active_tools()
-        system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR))
+        messages_path = str(self.session.dir / "messages.jsonl")
+        system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR), messages_path)
 
         messages = [
             {"role": "system", "content": system_prompt},
