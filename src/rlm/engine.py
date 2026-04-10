@@ -1,4 +1,4 @@
-"""The agent loop. Standard tool-calling with bash + edit."""
+"""The agent loop."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import get_active_tools, load_skills
+from rlm.tools import SKILLS_DIR, get_active_tools, run_bash
 from rlm.types import RLMResult, TokenUsage
 
 
@@ -24,7 +24,6 @@ class RLMEngine:
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
-        tools: list[str] | None = None,
     ):
         self.model = model or os.environ.get("RLM_MODEL", "gpt-4o")
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
@@ -33,14 +32,6 @@ class RLMEngine:
         self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "3"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-
-        # Tools
-        if tools is not None:
-            self.allowed_tools = tools
-        else:
-            self.allowed_tools = os.environ.get(
-                "RLM_TOOLS", "bash,edit,websearch"
-            ).split(",")
 
         # Context window awareness
         self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
@@ -54,9 +45,6 @@ class RLMEngine:
         self.client = client or make_client()
         self.session = session
         self._total_usage = TokenUsage()
-
-        # Load skill modules
-        self._skills = load_skills(self.allowed_tools)
 
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
@@ -80,11 +68,10 @@ class RLMEngine:
             start_time=time.time(),
             prompt_preview=prompt[:200],
             cwd=self.cwd,
-            tools=self.allowed_tools,
         )
 
-        active_tools = get_active_tools(self._skills)
-        system_prompt = build_system_prompt(self.cwd)
+        active_tools = get_active_tools()
+        system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR))
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -108,7 +95,9 @@ class RLMEngine:
             self._last_prompt_tokens = usage.prompt_tokens
 
             msg = response.choices[0].message
-            messages.append(msg.model_dump(exclude_none=True))
+            msg_dict = msg.model_dump(exclude_none=True)
+            msg_dict.setdefault("content", "")
+            messages.append(msg_dict)
 
             # Log assistant message
             tool_calls_log = None
@@ -204,9 +193,6 @@ class RLMEngine:
             if child_dir:
                 env["RLM_SESSION_DIR"] = str(child_dir)
             env["RLM_DEPTH"] = str(self.depth + 1)
-            sub_tools = env.get("RLM_SUB_TOOLS")
-            if sub_tools:
-                env["RLM_TOOLS"] = sub_tools
 
             proc = await asyncio.create_subprocess_exec(
                 "rlm",
@@ -240,17 +226,12 @@ class RLMEngine:
         return await asyncio.gather(*[_run_one(p) for p in prompts])
 
     def _execute_tool(self, name: str, args: dict) -> str:
-        skill = self._skills.get(name)
-        if skill is None:
-            return f"Error: unknown tool '{name}'"
-
-        ctx = {
-            "cwd": self.cwd,
-            "session": self.session,
-            "timeout": self.bash_timeout,
-            "max_output": self.max_output,
-        }
-        try:
-            return skill.run(**args, **ctx)
-        except Exception as e:
-            return f"Error running {name}: {e}"
+        if name == "bash":
+            return run_bash(
+                args["command"],
+                cwd=self.cwd,
+                session=self.session,
+                timeout=self.bash_timeout,
+                max_output=self.max_output,
+            )
+        return f"Error: unknown tool '{name}'"
