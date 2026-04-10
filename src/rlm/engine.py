@@ -185,8 +185,7 @@ class RLMEngine:
 
             # Drop old turn-groups from messages after summarize.
             # A turn-group = one assistant message + its following tool messages.
-            # We never drop system prompt (messages[0]), user message ([1]),
-            # or the current turn (last assistant + its tool results).
+            # Preamble (system/user) and current turn are never dropped.
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
         else:
@@ -252,20 +251,20 @@ class RLMEngine:
         return await asyncio.gather(*[_run_one(p) for p in prompts])
 
     def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
-        """Handle the summarize tool. Returns the accumulated summaries or an error.
+        """Validate args, accumulate the summary, and return all summaries so far.
 
-        Validation only — actual message dropping happens after all tool results
-        are appended (see _drop_turns).
+        Does NOT drop messages — that happens after all tool results are
+        appended to the messages list (see _drop_turns).
         """
-        num_turns = args.get("num_turns", 0)
+        num_turns = args.get("num_turns")
         summary = args.get("summary", "")
 
-        # Count droppable turns: assistant messages in messages[2:] minus the
-        # current turn (the last assistant message, which has the summarize call).
-        droppable = sum(1 for m in messages[2:] if m["role"] == "assistant") - 1
+        # Count droppable turns: all assistant messages minus the current turn
+        # (the last assistant message, which has the summarize call).
+        droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
 
-        if num_turns <= 0:
-            return f"[no-op] num_turns must be > 0 (got {num_turns}). No context was dropped."
+        if num_turns is None or num_turns <= 0:
+            return f"[no-op] num_turns is required and must be > 0 (got {num_turns}). No context was dropped."
         if num_turns > droppable:
             return (
                 f"[no-op] num_turns={num_turns} exceeds droppable turns "
@@ -280,25 +279,27 @@ class RLMEngine:
 
     @staticmethod
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
-        """Remove the first num_turns turn-groups from messages[2:] in place.
+        """Remove the first num_turns turn-groups in place.
 
+        Skips non-assistant messages at the start (system, user) automatically.
         A turn-group starts at an assistant message and includes all following
         tool messages up to (but not including) the next assistant message.
         """
-        dropped = 0
-        end = 2  # start scanning after system + user
-        while end < len(messages) and dropped < num_turns:
-            if messages[end]["role"] == "assistant":
-                dropped += 1
-                if dropped > num_turns:
-                    break
-                end += 1
-                # consume following tool messages
-                while end < len(messages) and messages[end]["role"] == "tool":
-                    end += 1
-            else:
-                end += 1
-        del messages[2:end]
+        # Find where assistant messages begin (skip system/user preamble)
+        start = 0
+        while start < len(messages) and messages[start]["role"] != "assistant":
+            start += 1
+
+        # Walk forward, consuming num_turns turn-groups.
+        # Each turn-group = one assistant message + its following tool messages.
+        end = start
+        for _ in range(num_turns):
+            if end >= len(messages) or messages[end]["role"] != "assistant":
+                break
+            end += 1  # skip the assistant message
+            while end < len(messages) and messages[end]["role"] == "tool":
+                end += 1  # skip its tool messages
+        del messages[start:end]
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "bash":
