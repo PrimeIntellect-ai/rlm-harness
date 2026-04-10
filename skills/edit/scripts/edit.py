@@ -41,3 +41,21 @@ def run(
 
     filepath.write_text(content.replace(old_str, new_str, 1))
     return f"Edited {path}"
+
+
+def main():
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(prog="edit")
+    parser.add_argument("path", help="File path to edit.")
+    parser.add_argument("old_str", help="The exact string to find (must be unique).")
+    parser.add_argument("new_str", help="The replacement string.")
+    parser.add_argument("--cwd", default=os.getcwd(), help="Working directory.")
+    args = parser.parse_args()
+
+    print(run(args.path, args.old_str, args.new_str, cwd=args.cwd))
+
+
+if __name__ == "__main__":
+    main()

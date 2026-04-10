@@ -140,3 +140,36 @@ def run(
         )
 
     return output
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="websearch")
+    parser.add_argument("queries", nargs="+", help="Google search queries (up to 10).")
+    parser.add_argument(
+        "--max-output",
+        type=int,
+        default=8192,
+        help="Truncate output to this many chars.",
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=None, help="Per-query HTTP timeout in seconds."
+    )
+    parser.add_argument(
+        "--num-results", type=int, default=None, help="Organic results per query."
+    )
+    args = parser.parse_args()
+
+    print(
+        run(
+            args.queries,
+            max_output=args.max_output,
+            timeout=args.timeout,
+            num_results=args.num_results,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

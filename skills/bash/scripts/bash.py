@@ -77,3 +77,31 @@ def run(
         )
 
     return output
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="bash")
+    parser.add_argument("command", help="The shell command to execute.")
+    parser.add_argument("--cwd", default=os.getcwd(), help="Working directory.")
+    parser.add_argument(
+        "--timeout", type=int, default=120, help="Seconds before timeout."
+    )
+    parser.add_argument(
+        "--max-output",
+        type=int,
+        default=8192,
+        help="Truncate output to this many chars.",
+    )
+    args = parser.parse_args()
+
+    print(
+        run(
+            args.command, cwd=args.cwd, timeout=args.timeout, max_output=args.max_output
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
