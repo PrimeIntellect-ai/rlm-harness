@@ -122,8 +122,8 @@ _os.chdir({self.cwd!r})
 _rlm_session_dir = {session_dir!r}
 _rlm_depth = int(_os.environ.get('RLM_DEPTH', '0'))
 
-def rlm(prompt: str) -> str:
-    \"\"\"Run an rlm sub-agent on the given prompt. Returns its answer.\"\"\"
+def _rlm_spawn(prompt: str) -> str:
+    \"\"\"Spawn a single rlm sub-agent. Internal helper.\"\"\"
     import uuid as _uuid
     child_id = _uuid.uuid4().hex[:8]
     child_dir = _os.path.join(_rlm_session_dir, f'sub-{{child_id}}') if _rlm_session_dir else None
@@ -138,6 +138,16 @@ def rlm(prompt: str) -> str:
         capture_output=True, text=True, cwd={self.cwd!r}, env=env,
     )
     return result.stdout.strip()
+
+def rlm(prompt: str) -> str:
+    \"\"\"Run an rlm sub-agent on the given prompt. Returns its answer.\"\"\"
+    return _rlm_spawn(prompt)
+
+def rlm_batch(prompts: list) -> list:
+    \"\"\"Run multiple rlm sub-agents in parallel. Returns list of answers.\"\"\"
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    with _TPE(max_workers=len(prompts)) as pool:
+        return list(pool.map(_rlm_spawn, prompts))
 """
         self._execute_silent(setup_code)
 
