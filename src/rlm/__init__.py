@@ -12,6 +12,9 @@ __all__ = ["run", "batch", "RLMEngine", "RLMResult"]
 
 def run(prompt: str, **kwargs) -> RLMResult:
     """Run a single rlm agent. Blocking convenience wrapper."""
+    # When called as a sub-agent (depth > 0), create a child session dir
+    # under the parent so sibling calls nest correctly. We mutate the env
+    # var and restore it after — safe because kernel calls are serialized.
     parent_dir = os.environ.get("RLM_SESSION_DIR")
     depth = int(os.environ.get("RLM_DEPTH", "0"))
     if parent_dir and depth > 0:
