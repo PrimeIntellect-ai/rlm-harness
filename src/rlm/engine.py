@@ -54,6 +54,13 @@ class RLMEngine:
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
 
+    def _ensure_session(self):
+        """Create session if not set."""
+        if self.session is not None:
+            return
+        session_dir = os.environ.get("RLM_SESSION_DIR")
+        self.session = Session(session_dir)
+
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
         # Check depth limit
@@ -63,10 +70,7 @@ class RLMEngine:
                 turns=0,
             )
 
-        # Session setup
-        if self.session is None:
-            session_dir = os.environ.get("RLM_SESSION_DIR")
-            self.session = Session(session_dir)
+        self._ensure_session()
 
         self.session.write_meta(
             session_id=self.session.dir.name,
@@ -225,6 +229,7 @@ class RLMEngine:
 
     async def batch(self, prompts: list[str]) -> list[RLMResult]:
         """Run multiple agents in parallel as subprocesses."""
+        self._ensure_session()
 
         async def _run_one(prompt: str) -> RLMResult:
             child_dir = self.session.child_dir() if self.session else None
