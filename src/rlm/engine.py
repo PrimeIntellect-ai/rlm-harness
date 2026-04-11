@@ -75,6 +75,7 @@ class RLMEngine:
         )
 
         active_tools = get_active_tools()
+        self._active_tool_names = {t["function"]["name"] for t in active_tools}
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR), messages_path)
 
@@ -140,7 +141,9 @@ class RLMEngine:
                 n = tc.function.name
                 a = json.loads(tc.function.arguments)
                 t0 = time.time()
-                if n == "summarize":
+                if n not in self._active_tool_names:
+                    r = f"Error: tool '{n}' is not enabled. Active tools: {', '.join(sorted(self._active_tool_names))}"
+                elif n == "summarize":
                     r = self._execute_summarize(a, messages)
                 else:
                     r = await asyncio.to_thread(self._execute_tool, n, a)
