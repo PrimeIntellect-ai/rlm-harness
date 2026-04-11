@@ -30,7 +30,7 @@ class RLMEngine:
         self.cwd = cwd or os.getcwd()
         self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
         self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
-        self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "3"))
+        self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
         # Context window awareness
@@ -64,7 +64,7 @@ class RLMEngine:
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
         # Check depth limit
-        if self.depth >= self.max_depth:
+        if self.depth > self.max_depth:
             return RLMResult(
                 answer=f"[depth limit {self.max_depth} reached, cannot start]",
                 turns=0,

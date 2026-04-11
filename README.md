@@ -48,7 +48,7 @@ All via environment variables:
 | `RLM_API_KEY` | — | API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) |
 | `RLM_BASE_URL` | — | API endpoint |
 | `RLM_MAX_TURNS` | `30` | Max tool-calling turns per agent |
-| `RLM_MAX_DEPTH` | `3` | Max recursion depth |
+| `RLM_MAX_DEPTH` | `0` | Max recursion depth (0 = flat, no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per tool execution |
 | `RLM_MAX_OUTPUT` | `8192` | Truncate tool output (chars) |
 | `RLM_TOOLS` | `bash,edit,websearch` | Active tools (comma-separated) |
