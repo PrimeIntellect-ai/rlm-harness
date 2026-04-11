@@ -16,7 +16,7 @@ def build_system_prompt(cwd: str, skills_dir: str, messages_path: str) -> str:
         "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",
         "Use %%bash for multi-line shell scripts.",
         "",
-        "Call rlm.run('sub-task') to spawn a recursive sub-agent.",
+        "The `rlm` module is pre-imported. Call rlm.run('sub-task') to spawn a recursive sub-agent.",
         "Call rlm.batch(['task1', 'task2', ...]) to run multiple sub-agents in parallel.",
         "",
         "Work one step at a time: execute code, read the output, then decide your next step.",
