@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import threading
@@ -212,8 +213,7 @@ def rlm(prompt: str) -> str:
 
 def get_active_tools() -> list[dict]:
     """Return OpenAI tool schemas with runtime defaults baked in."""
-    import copy
-    timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", os.environ.get("RLM_BASH_TIMEOUT", "300")))
+    timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
     schema = copy.deepcopy(IPYTHON_SCHEMA)
     schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
         f"Optional timeout in seconds. Default: {timeout}s."

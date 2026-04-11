@@ -28,9 +28,7 @@ class RLMEngine:
         self.model = model or os.environ.get("RLM_MODEL", "gpt-4o")
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
-        self.exec_timeout = int(
-            os.environ.get("RLM_EXEC_TIMEOUT", os.environ.get("RLM_BASH_TIMEOUT", "300"))
-        )
+        self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
         self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "3"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
@@ -227,7 +225,6 @@ class RLMEngine:
 
     async def batch(self, prompts: list[str]) -> list[RLMResult]:
         """Run multiple agents in parallel as subprocesses."""
-        import asyncio
 
         async def _run_one(prompt: str) -> RLMResult:
             child_dir = self.session.child_dir() if self.session else None

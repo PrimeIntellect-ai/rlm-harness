@@ -49,7 +49,7 @@ All via environment variables:
 | `RLM_BASE_URL` | — | API endpoint |
 | `RLM_MAX_TURNS` | `30` | Max tool-calling turns per agent |
 | `RLM_MAX_DEPTH` | `3` | Max recursion depth |
-| `RLM_BASH_TIMEOUT` | `120` | Seconds per bash command |
+| `RLM_EXEC_TIMEOUT` | `300` | Seconds per tool execution |
 | `RLM_MAX_OUTPUT` | `8192` | Truncate tool output (chars) |
 | `RLM_TOOLS` | `bash,edit,websearch` | Active tools (comma-separated) |
 | `RLM_SUB_TOOLS` | — | Tools for children (if different) |
