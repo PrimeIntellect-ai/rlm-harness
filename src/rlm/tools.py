@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,7 +27,6 @@ def _find_skills_dir() -> Path:
 
 
 SKILLS_DIR = _find_skills_dir()
-
 
 # -- Non-programmatic tool schemas --
 
@@ -55,77 +53,7 @@ BASH_SCHEMA = {
     },
 }
 
-PYTHON_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "python",
-        "description": (
-            "Execute Python code and return its output. "
-            "Use for data processing, calculations, file manipulation, "
-            "and importing programmatic tools as Python modules."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "description": "The Python code to execute.",
-                }
-            },
-            "required": ["code"],
-        },
-    },
-}
-
-# Handled specially in the engine — mutates the messages list instead of
-# returning output from a subprocess.
-SUMMARIZE_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "summarize",
-        "description": (
-            "Summarize and drop old turns from context to free up space. "
-            "A turn is one assistant response plus all its tool results. "
-            "Dropping num_turns removes the oldest complete turns from context."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "num_turns": {
-                    "type": "integer",
-                    "description": "Number of oldest turns to drop from context.",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "Your summary of the content being dropped.",
-                },
-            },
-            "required": ["num_turns", "summary"],
-        },
-    },
-}
-
-ALL_TOOLS = {
-    "bash": BASH_SCHEMA,
-    "python": PYTHON_SCHEMA,
-    "summarize": SUMMARIZE_SCHEMA,
-}
-
-DEFAULT_TOOLS = "bash,python,summarize"
-
 _RLM_CMD_RE = re.compile(r"\brlm\s")
-
-
-def _truncate(output: str, max_output: int) -> str:
-    if len(output) > max_output:
-        half = max_output // 2
-        total = len(output)
-        output = (
-            output[:half]
-            + f"\n... [output truncated, {total} chars total] ...\n"
-            + output[-half:]
-        )
-    return output
 
 
 def run_bash(
@@ -165,47 +93,48 @@ def run_bash(
     if result.returncode != 0:
         output += f"\n[exit code: {result.returncode}]"
 
-    return _truncate(output, max_output)
-
-
-def run_python(
-    code: str,
-    *,
-    cwd: str,
-    timeout: int = 120,
-    max_output: int = 8192,
-) -> str:
-    """Execute Python code by writing to a temp file and running it."""
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", dir=cwd, delete=False
-        ) as f:
-            f.write(code)
-            tmp_path = f.name
-
-        result = subprocess.run(
-            ["python", tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
+    # Truncate large output
+    if len(output) > max_output:
+        half = max_output // 2
+        total = len(output)
+        output = (
+            output[:half]
+            + f"\n... [output truncated, {total} chars total] ...\n"
+            + output[-half:]
         )
-    except subprocess.TimeoutExpired:
-        return f"[code timed out after {timeout}s]"
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
 
-    output = result.stdout
-    if result.stderr:
-        output += "\n" + result.stderr
-    if result.returncode != 0:
-        output += f"\n[exit code: {result.returncode}]"
-
-    return _truncate(output, max_output)
+    return output
 
 
-def get_active_tools(allowed: list[str] | None = None) -> list[dict]:
-    """Return OpenAI tool schemas for the allowed non-programmatic tools."""
-    if allowed is None:
-        allowed = os.environ.get("RLM_TOOLS", DEFAULT_TOOLS).split(",")
-    return [ALL_TOOLS[name] for name in allowed if name in ALL_TOOLS]
+# Handled specially in the engine — mutates the messages list instead of
+# returning output from a subprocess.
+SUMMARIZE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "summarize",
+        "description": (
+            "Summarize and drop old turns from context to free up space. "
+            "A turn is one assistant response plus all its tool results. "
+            "Dropping num_turns removes the oldest complete turns from context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "num_turns": {
+                    "type": "integer",
+                    "description": "Number of oldest turns to drop from context.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Your summary of the content being dropped.",
+                },
+            },
+            "required": ["num_turns", "summary"],
+        },
+    },
+}
+
+
+def get_active_tools() -> list[dict]:
+    """Return OpenAI tool schemas for non-programmatic tools."""
+    return [BASH_SCHEMA, SUMMARIZE_SCHEMA]

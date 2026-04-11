@@ -35,11 +35,6 @@ def main():
         default=None,
         help="Max turns (overrides RLM_MAX_TURNS)",
     )
-    parser.add_argument(
-        "--tools",
-        default=None,
-        help="Comma-separated core tools (overrides RLM_TOOLS, default: bash,python,summarize)",
-    )
     args, remaining = parser.parse_known_args()
 
     # Apply CLI overrides to env
@@ -47,8 +42,6 @@ def main():
         os.environ["RLM_MODEL"] = args.model
     if args.max_turns:
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
-    if args.tools:
-        os.environ["RLM_TOOLS"] = args.tools
 
     if args.batch:
         prompts = [args.prompt] + remaining if args.prompt else remaining

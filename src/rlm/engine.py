@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import SKILLS_DIR, get_active_tools, run_bash, run_python
+from rlm.tools import SKILLS_DIR, get_active_tools, run_bash
 from rlm.types import RLMResult, TokenUsage
 
 
@@ -308,13 +308,6 @@ class RLMEngine:
                 args["command"],
                 cwd=self.cwd,
                 session=self.session,
-                timeout=self.bash_timeout,
-                max_output=self.max_output,
-            )
-        if name == "python":
-            return run_python(
-                args["code"],
-                cwd=self.cwd,
                 timeout=self.bash_timeout,
                 max_output=self.max_output,
             )
