@@ -9,6 +9,7 @@ dependencies = [
     "openai>=1.0",
     "ipykernel",
     "jupyter_client",
+    "nest_asyncio",
 ]
 
 [project.scripts]

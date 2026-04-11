@@ -111,43 +111,19 @@ class IPythonREPL:
         self._inject_startup()
 
     def _inject_startup(self):
-        """Inject rlm() sub-agent function into kernel namespace."""
+        """Set up kernel: cwd, nest_asyncio, env vars, import rlm SDK."""
         session_dir = str(self.session.dir) if self.session else None
+        depth = int(os.environ.get("RLM_DEPTH", "0"))
         setup_code = f"""\
-import os as _os
-import subprocess as _subprocess
+import os
+os.chdir({self.cwd!r})
+os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
+os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 
-_os.chdir({self.cwd!r})
+import nest_asyncio
+nest_asyncio.apply()
 
-_rlm_session_dir = {session_dir!r}
-_rlm_depth = int(_os.environ.get('RLM_DEPTH', '0'))
-
-def _rlm_spawn(prompt: str) -> str:
-    \"\"\"Spawn a single rlm sub-agent. Internal helper.\"\"\"
-    import uuid as _uuid
-    child_id = _uuid.uuid4().hex[:8]
-    child_dir = _os.path.join(_rlm_session_dir, f'sub-{{child_id}}') if _rlm_session_dir else None
-    if child_dir:
-        _os.makedirs(child_dir, exist_ok=True)
-    env = _os.environ.copy()
-    if child_dir:
-        env['RLM_SESSION_DIR'] = child_dir
-    env['RLM_DEPTH'] = str(_rlm_depth + 1)
-    result = _subprocess.run(
-        ['rlm', prompt],
-        capture_output=True, text=True, cwd={self.cwd!r}, env=env,
-    )
-    return result.stdout.strip()
-
-def rlm(prompt: str) -> str:
-    \"\"\"Run an rlm sub-agent on the given prompt. Returns its answer.\"\"\"
-    return _rlm_spawn(prompt)
-
-def rlm_batch(prompts: list) -> list:
-    \"\"\"Run multiple rlm sub-agents in parallel. Returns list of answers.\"\"\"
-    from concurrent.futures import ThreadPoolExecutor as _TPE
-    with _TPE(max_workers=len(prompts)) as pool:
-        return list(pool.map(_rlm_spawn, prompts))
+import rlm
 """
         self._execute_silent(setup_code)
 
