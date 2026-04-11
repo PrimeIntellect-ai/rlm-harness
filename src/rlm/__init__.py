@@ -10,21 +10,23 @@ from rlm.types import RLMResult
 __all__ = ["run", "batch", "RLMEngine", "RLMResult"]
 
 
-def run(prompt: str, **kwargs) -> RLMResult:
-    """Run a single rlm agent. Blocking convenience wrapper."""
-    # When called as a sub-agent (depth > 0), create a child session dir
-    # under the parent so sibling calls nest correctly. We mutate the env
-    # var and restore it after — safe because kernel calls are serialized.
+def _child_session() -> Session | None:
+    """If inside a parent session (depth > 0), create a child under it."""
     parent_dir = os.environ.get("RLM_SESSION_DIR")
     depth = int(os.environ.get("RLM_DEPTH", "0"))
     if parent_dir and depth > 0:
-        child_dir = Session(parent_dir).child_dir()
-        os.environ["RLM_SESSION_DIR"] = str(child_dir)
+        return Session(Session(parent_dir).child_dir())
+    return None
+
+
+def run(prompt: str, **kwargs) -> RLMResult:
+    """Run a single rlm agent. Blocking convenience wrapper."""
+    if "session" not in kwargs:
+        child = _child_session()
+        if child:
+            kwargs["session"] = child
     engine = RLMEngine(**kwargs)
-    result = asyncio.run(engine.run(prompt))
-    if parent_dir and depth > 0:
-        os.environ["RLM_SESSION_DIR"] = parent_dir
-    return result
+    return asyncio.run(engine.run(prompt))
 
 
 def batch(prompts: list[str], **kwargs) -> list[RLMResult]:

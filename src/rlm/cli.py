@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 
-from rlm.engine import RLMEngine
-from rlm.session import Session
+import rlm
 
 
 def main():
@@ -47,35 +45,16 @@ def main():
         prompts = [args.prompt] + remaining if args.prompt else remaining
         if not prompts:
             parser.error("--batch requires at least one prompt")
-        asyncio.run(_run_batch(prompts))
+        results = rlm.batch(prompts)
+        for i, r in enumerate(results):
+            print(f"--- [{i}] ---")
+            print(r.answer)
+            print()
     elif args.prompt:
-        asyncio.run(_run_headless(args.prompt))
+        result = rlm.run(args.prompt)
+        print(result.answer)
     else:
         _run_interactive()
-
-
-async def _run_headless(prompt: str):
-    engine = RLMEngine()
-    result = await engine.run(prompt)
-    print(result.answer)
-
-
-async def _run_batch(prompts: list[str]):
-    engine = RLMEngine()
-    session_dir = os.environ.get("RLM_SESSION_DIR")
-    engine.session = Session(session_dir)
-    engine.session.write_meta(
-        session_id=engine.session.dir.name,
-        model=engine.model,
-        status="batch",
-        batch_size=len(prompts),
-    )
-
-    results = await engine.batch(prompts)
-    for i, r in enumerate(results):
-        print(f"--- [{i}] ---")
-        print(r.answer)
-        print()
 
 
 def _run_interactive():
