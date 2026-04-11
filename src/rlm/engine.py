@@ -29,7 +29,7 @@ class RLMEngine:
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
         self.exec_timeout = int(
-            os.environ.get("RLM_EXEC_TIMEOUT", os.environ.get("RLM_BASH_TIMEOUT", "120"))
+            os.environ.get("RLM_EXEC_TIMEOUT", os.environ.get("RLM_BASH_TIMEOUT", "300"))
         )
         self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "3"))
@@ -168,6 +168,10 @@ class RLMEngine:
                     summarize_num_turns = json.loads(tc.function.arguments).get(
                         "num_turns", 0
                     )
+
+                # Append execution duration
+                if tc.function.name != "summarize":
+                    result += f"\n[executed in {duration:.1f}s]"
 
                 # Append token budget info
                 if self.max_tokens:
