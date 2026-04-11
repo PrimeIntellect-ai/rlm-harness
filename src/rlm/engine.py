@@ -91,7 +91,7 @@ class RLMEngine:
             self._repl.shutdown()
 
     async def _run_loop(self, prompt: str) -> RLMResult:
-        active_tools = get_active_tools()
+        active_tools = get_active_tools(exec_timeout=self.exec_timeout)
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR), messages_path)
 

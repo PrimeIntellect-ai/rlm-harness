@@ -49,7 +49,7 @@ IPYTHON_SCHEMA = {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in seconds. Default: no limit.",
+                    "description": None,  # filled in by get_active_tools()
                 },
             },
             "required": ["code"],
@@ -210,6 +210,11 @@ def rlm(prompt: str) -> str:
             self._km.shutdown_kernel(now=True)
 
 
-def get_active_tools() -> list[dict]:
-    """Return OpenAI tool schemas."""
-    return [IPYTHON_SCHEMA, SUMMARIZE_SCHEMA]
+def get_active_tools(exec_timeout: int = 300) -> list[dict]:
+    """Return OpenAI tool schemas with runtime defaults baked in."""
+    import copy
+    schema = copy.deepcopy(IPYTHON_SCHEMA)
+    schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
+        f"Optional timeout in seconds. Default: {exec_timeout}s."
+    )
+    return [schema, SUMMARIZE_SCHEMA]
