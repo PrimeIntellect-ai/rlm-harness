@@ -10,9 +10,15 @@ def build_system_prompt(cwd: str, skills_dir: str, messages_path: str) -> str:
     verbosity = os.environ.get("RLM_SYSTEM_PROMPT_VERBOSITY", "medium")
 
     parts = [
-        "You are a coding agent. You solve tasks by calling tools, observing results, and iterating.",
+        "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating.",
         "",
-        "Work one step at a time: call a tool, read the output, then decide your next step.",
+        "You have a persistent IPython session. Variables, imports, and function definitions persist across calls.",
+        "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",
+        "Use %%bash for multi-line shell scripts.",
+        "",
+        "Call rlm('sub-task description') to spawn a recursive sub-agent.",
+        "",
+        "Work one step at a time: execute code, read the output, then decide your next step.",
         "When you are done, stop calling tools and state your final answer.",
         f"Working directory: {cwd}",
         "",

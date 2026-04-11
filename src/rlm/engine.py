@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import SKILLS_DIR, get_active_tools, run_bash
+from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools
 from rlm.types import RLMResult, TokenUsage
 
 
@@ -28,7 +28,8 @@ class RLMEngine:
         self.model = model or os.environ.get("RLM_MODEL", "gpt-4o")
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
-        self.bash_timeout = int(os.environ.get("RLM_BASH_TIMEOUT", "120"))
+        _timeout = os.environ.get("RLM_EXEC_TIMEOUT", os.environ.get("RLM_BASH_TIMEOUT", ""))
+        self.exec_timeout = int(_timeout) if _timeout else None
         self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "3"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
@@ -49,6 +50,10 @@ class RLMEngine:
         # Summarize tool state
         self._summaries: list[str] = []
         self._dropped_turn_count: int = 0
+
+        # IPython REPL (started lazily in run())
+        self._repl: IPythonREPL | None = None
+        self._known_children: set[str] = set()
 
     async def run(self, prompt: str) -> RLMResult:
         """Run the agent loop to completion."""
@@ -74,6 +79,17 @@ class RLMEngine:
             cwd=self.cwd,
         )
 
+        # Start IPython kernel
+        self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
+        self._repl.start()
+        self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
+
+        try:
+            return await self._run_loop(prompt)
+        finally:
+            self._repl.shutdown()
+
+    async def _run_loop(self, prompt: str) -> RLMResult:
         active_tools = get_active_tools()
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR), messages_path)
@@ -129,11 +145,7 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls (parallel when multiple).
-            # Summarize is handled inline — it's pure string ops and needs
-            # to read/write engine state (_summaries, _dropped_turn_count).
-            # After all results are appended, we drop old messages if
-            # summarize was called.
+            # Execute tool calls
             summarize_num_turns = 0
 
             async def _exec_one(tc):
@@ -151,13 +163,12 @@ class RLMEngine:
             )
 
             for tc, result, duration in tool_results:
-                # Track if summarize was called (for post-processing)
                 if tc.function.name == "summarize" and not result.startswith("[no-op]"):
                     summarize_num_turns = json.loads(tc.function.arguments).get(
                         "num_turns", 0
                     )
 
-                # Append token budget info (only when budget is set)
+                # Append token budget info
                 if self.max_tokens:
                     result += f"\n[{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens used]"
 
@@ -184,13 +195,13 @@ class RLMEngine:
                     }
                 )
 
-            # Drop old turn-groups from messages after summarize.
-            # A turn-group = one assistant message + its following tool messages.
-            # Preamble (system/user) and current turn are never dropped.
+            # Detect new child sessions spawned via rlm()
+            self._detect_new_children()
+
+            # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
         else:
-            # Max turns exhausted
             final_text = msg.content or "[max turns reached]"
 
         result = RLMResult(
@@ -231,7 +242,6 @@ class RLMEngine:
             stdout, _ = await proc.communicate()
             answer = stdout.decode().strip()
 
-            # Read structured data from child's meta.json
             usage = TokenUsage()
             turns = 0
             if child_dir:
@@ -251,17 +261,20 @@ class RLMEngine:
 
         return await asyncio.gather(*[_run_one(p) for p in prompts])
 
-    def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
-        """Validate args, accumulate the summary, and return all summaries so far.
+    def _detect_new_children(self):
+        """Scan session dir for new sub-* directories and log them."""
+        if not self.session:
+            return
+        current = {p.name for p in self.session.dir.glob("sub-*")}
+        new = current - self._known_children
+        for child_name in sorted(new):
+            self.session.log_sub_spawn(child_name, "(spawned via rlm())")
+        self._known_children = current
 
-        Does NOT drop messages — that happens after all tool results are
-        appended to the messages list (see _drop_turns).
-        """
+    def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
         num_turns = args.get("num_turns")
         summary = args.get("summary", "")
 
-        # Count droppable turns: all assistant messages minus the current turn
-        # (the last assistant message, which has the summarize call).
         droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
 
         if num_turns is None or num_turns <= 0:
@@ -280,35 +293,25 @@ class RLMEngine:
 
     @staticmethod
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
-        """Remove the first num_turns turn-groups in place.
-
-        Skips non-assistant messages at the start (system, user) automatically.
-        A turn-group starts at an assistant message and includes all following
-        tool messages up to (but not including) the next assistant message.
-        """
-        # Find where assistant messages begin (skip system/user preamble)
         start = 0
         while start < len(messages) and messages[start]["role"] != "assistant":
             start += 1
 
-        # Walk forward, consuming num_turns turn-groups.
-        # Each turn-group = one assistant message + its following tool messages.
         end = start
         for _ in range(num_turns):
             if end >= len(messages) or messages[end]["role"] != "assistant":
                 break
-            end += 1  # skip the assistant message
+            end += 1
             while end < len(messages) and messages[end]["role"] == "tool":
-                end += 1  # skip its tool messages
+                end += 1
         del messages[start:end]
 
     def _execute_tool(self, name: str, args: dict) -> str:
-        if name == "bash":
-            return run_bash(
-                args["command"],
-                cwd=self.cwd,
-                session=self.session,
-                timeout=self.bash_timeout,
+        if name == "ipython":
+            timeout = args.get("timeout") or self.exec_timeout
+            return self._repl.execute(
+                args["code"],
+                timeout=timeout,
                 max_output=self.max_output,
             )
         return f"Error: unknown tool '{name}'"
