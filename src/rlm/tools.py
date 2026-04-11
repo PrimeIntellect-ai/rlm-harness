@@ -176,6 +176,7 @@ def run_python(
     max_output: int = 8192,
 ) -> str:
     """Execute Python code by writing to a temp file and running it."""
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", dir=cwd, delete=False
@@ -192,8 +193,11 @@ def run_python(
         )
     except subprocess.TimeoutExpired:
         return f"[code timed out after {timeout}s]"
+    except Exception as e:
+        return f"Error: {e}"
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
 
     output = result.stdout
     if result.stderr:
