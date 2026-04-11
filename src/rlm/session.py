@@ -13,7 +13,7 @@ class Session:
     def __init__(self, session_dir: Path | None = None):
         if session_dir is None:
             sid = uuid.uuid4().hex[:12]
-            rlm_home = Path(os.environ.get("RLM_HOME", Path.home() / ".rlm"))
+            rlm_home = Path(os.environ.get("RLM_HOME", ".rlm"))
             session_dir = rlm_home / "sessions" / sid
         self.dir = Path(session_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
