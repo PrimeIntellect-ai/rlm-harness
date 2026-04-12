@@ -54,7 +54,6 @@ All via environment variables:
 | `RLM_TOOLS` | `bash,edit,websearch` | Active tools (comma-separated) |
 | `RLM_SUB_TOOLS` | — | Tools for children (if different) |
 | `RLM_HOME` | `~/.rlm` | Root directory for sessions and data |
-| `RLM_SYSTEM_PROMPT_VERBOSITY` | `medium` | light / medium / heavy |
 | `SERPER_API_KEY` | — | API key for `websearch` tool ([serper.dev](https://serper.dev)) |
 | `RLM_WEBSEARCH_TIMEOUT` | `45` | Per-query HTTP timeout (seconds) |
 | `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results per query |
