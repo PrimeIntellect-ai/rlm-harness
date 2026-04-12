@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 import os
+from queue import Empty
 import re
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -132,21 +134,70 @@ import rlm
         self._kc.execute(code, silent=True)
         self._kc.get_shell_msg(timeout=30)
 
-    def execute(self, code: str, timeout: int | None = None, max_output: int = 8192) -> str:
+    def _wait_for_idle(self, timeout: float) -> bool:
+        """Wait briefly for the kernel to report an idle state."""
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            try:
+                msg = self._kc.get_iopub_msg(timeout=remaining)
+            except Empty:
+                return False
+            if (
+                msg["msg_type"] == "status"
+                and msg["content"].get("execution_state") == "idle"
+            ):
+                return True
+
+    def _restart_kernel(self):
+        """Restart the kernel and restore the initial REPL state."""
+        if self._kc:
+            self._kc.stop_channels()
+        self._km.restart_kernel(now=True)
+        self._kc = self._km.client()
+        self._kc.start_channels()
+        self._kc.wait_for_ready(timeout=30)
+        self._inject_startup()
+
+    def _interrupt_and_recover(self):
+        """Interrupt the running cell and restart the kernel if needed."""
+        self._km.interrupt_kernel()
+        if not self._wait_for_idle(timeout=2):
+            self._restart_kernel()
+
+    def execute(
+        self, code: str, timeout: int | None = None, max_output: int = 8192
+    ) -> str:
         """Execute code and return combined output. Thread-safe via lock."""
         with self._lock:
             return self._execute_locked(code, timeout, max_output)
 
     def _execute_locked(self, code: str, timeout: int | None, max_output: int) -> str:
         msg_id = self._kc.execute(code)
+        deadline = None if timeout is None else time.monotonic() + timeout
 
         outputs: list[str] = []
         try:
             while True:
+                if deadline is None:
+                    wait_timeout = None
+                else:
+                    wait_timeout = deadline - time.monotonic()
+                    if wait_timeout <= 0:
+                        self._interrupt_and_recover()
+                        outputs.append(
+                            f"\n[execution timed out after {timeout}s and was interrupted]"
+                        )
+                        break
                 try:
-                    msg = self._kc.get_iopub_msg(timeout=timeout)
-                except Exception:
-                    outputs.append(f"\n[execution timed out after {timeout}s]")
+                    msg = self._kc.get_iopub_msg(timeout=wait_timeout)
+                except Empty:
+                    self._interrupt_and_recover()
+                    outputs.append(
+                        f"\n[execution timed out after {timeout}s and was interrupted]"
+                    )
                     break
 
                 # Only process messages from this execution
