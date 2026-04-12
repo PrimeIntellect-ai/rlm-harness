@@ -167,8 +167,8 @@ import rlm
         if not self._wait_for_idle(timeout=2):
             self._restart_kernel()
 
-    def execute(self, code: str, timeout: int | None = None) -> str:
-        """Execute code and return combined output. Thread-safe via lock."""
+    async def execute(self, code: str, timeout: int | None = None) -> str:
+        """Execute code and return combined output."""
         with self._lock:
             return self._execute_locked(code, timeout)
 

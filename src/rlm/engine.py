@@ -169,7 +169,7 @@ class RLMEngine:
                 if n == "summarize":
                     r = self._execute_summarize(a, messages)
                 else:
-                    r = await asyncio.to_thread(self._execute_tool, n, a)
+                    r = await self._execute_tool(n, a)
                 return tc, r, time.time() - t0
 
             tool_results = await asyncio.gather(
@@ -337,8 +337,8 @@ class RLMEngine:
                 end += 1
         del messages[start:end]
 
-    def _execute_tool(self, name: str, args: dict) -> str:
+    async def _execute_tool(self, name: str, args: dict) -> str:
         if name == "ipython":
             timeout = args.get("timeout") or self.exec_timeout
-            return self._repl.execute(args["code"], timeout=timeout)
+            return await self._repl.execute(args["code"], timeout=timeout)
         return f"Error: unknown tool '{name}'"

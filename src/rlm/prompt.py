@@ -23,7 +23,7 @@ def build_system_prompt(
         f"Working directory: {cwd}",
         "",
         f"Programmatic tools are available as Python modules in {skills_dir}.",
-        "Each subdirectory is a tool. Run with --help to see usage.",
+        "Each subdirectory is a tool. Import them in Python and await run(...), or invoke them via their CLI with --help.",
         "",
         f"Your conversation is logged to {messages_path}.",
     ]

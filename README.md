@@ -96,6 +96,14 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 Bundled helper scripts live under [`skills/`](skills). The system prompt points the model at that directory so it can use those scripts from IPython when needed.
 
+From IPython, import a tool module and `await` its `run(...)` function:
+
+```python
+from skills.websearch.scripts.websearch import run as websearch
+
+await websearch(["latest jupyter_client release"])
+```
+
 ## Interactive Mode
 
 Running `rlm` with no prompts enters a placeholder interactive mode. The TUI is not implemented yet.
