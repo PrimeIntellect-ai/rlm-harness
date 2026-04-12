@@ -167,14 +167,12 @@ import rlm
         if not self._wait_for_idle(timeout=2):
             self._restart_kernel()
 
-    def execute(
-        self, code: str, timeout: int | None = None, max_output: int = 8192
-    ) -> str:
+    def execute(self, code: str, timeout: int | None = None) -> str:
         """Execute code and return combined output. Thread-safe via lock."""
         with self._lock:
-            return self._execute_locked(code, timeout, max_output)
+            return self._execute_locked(code, timeout)
 
-    def _execute_locked(self, code: str, timeout: int | None, max_output: int) -> str:
+    def _execute_locked(self, code: str, timeout: int | None) -> str:
         msg_id = self._kc.execute(code)
         deadline = None if timeout is None else time.monotonic() + timeout
 
@@ -226,19 +224,7 @@ import rlm
             except Exception:
                 pass
 
-        output = "".join(outputs)
-
-        # Truncate large output
-        if len(output) > max_output:
-            half = max_output // 2
-            total = len(output)
-            output = (
-                output[:half]
-                + f"\n... [output truncated, {total} chars total] ...\n"
-                + output[-half:]
-            )
-
-        return output
+        return "".join(outputs)
 
     def shutdown(self):
         """Stop the kernel."""

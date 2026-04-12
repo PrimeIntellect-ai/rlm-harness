@@ -30,7 +30,12 @@ class RLMEngine:
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
         self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
-        self.max_output = int(os.environ.get("RLM_MAX_OUTPUT", "8192"))
+        max_output = int(os.environ.get("RLM_MAX_OUTPUT", "-1"))
+        if max_output == 0:
+            raise ValueError(
+                "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
+            )
+        self.max_output = max_output
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
@@ -199,6 +204,8 @@ class RLMEngine:
                     )
                     self._context_warning_sent = True
 
+                if self.max_output > 0 and len(result) > self.max_output:
+                    result = result[: self.max_output]
                 self.session.log_tool_result(turn, tc.function.name, result, duration)
                 messages.append(
                     {
@@ -333,9 +340,5 @@ class RLMEngine:
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "ipython":
             timeout = args.get("timeout") or self.exec_timeout
-            return self._repl.execute(
-                args["code"],
-                timeout=timeout,
-                max_output=self.max_output,
-            )
+            return self._repl.execute(args["code"], timeout=timeout)
         return f"Error: unknown tool '{name}'"
