@@ -15,7 +15,7 @@ def _child_session() -> Session | None:
     parent_dir = os.environ.get("RLM_SESSION_DIR")
     depth = int(os.environ.get("RLM_DEPTH", "0"))
     if parent_dir and depth > 0:
-        return Session(Session(parent_dir).child_dir())
+        return Session(Session.child_dir(parent_dir))
     return None
 
 

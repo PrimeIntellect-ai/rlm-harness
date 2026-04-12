@@ -232,7 +232,7 @@ class RLMEngine:
         self._ensure_session()
 
         async def _run_one(prompt: str) -> RLMResult:
-            child_dir = self.session.child_dir() if self.session else None
+            child_dir = Session.child_dir(self.session.dir) if self.session else None
             env = os.environ.copy()
             if child_dir:
                 env["RLM_SESSION_DIR"] = str(child_dir)
