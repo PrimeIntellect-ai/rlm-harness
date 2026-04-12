@@ -7,7 +7,7 @@ The model gets two built-in tools:
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
 - `summarize` for dropping old turns from context
 
-Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `rlm.batch(...)` to spawn one or more sub-agents.
+Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents.
 
 ## Install
 
@@ -21,25 +21,18 @@ uv pip install -e .
 # Source your API keys
 source .env
 
-# Single prompt
 uv run rlm "fix the auth bug in login.py"
-
-# Multiple prompts run in parallel
-uv run rlm "check auth.py" "check login.py" "check session.py"
 
 # Override model/limits
 RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run rlm "refactor the parser"
 ```
-
-With one prompt, `rlm` prints a single answer. With multiple prompts, it runs a batch and prints one section per result.
 
 ## Python SDK
 
 ```python
 import rlm
 
-result = rlm.batch("fix the bug")[0]
-results = rlm.batch(["check a.py", "check b.py"])
+result = await rlm.run("fix the bug")
 ```
 
 ## Configuration
@@ -69,8 +62,18 @@ CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 "prompt"`
 Each agent runs inside a persistent IPython kernel. The `rlm` module is pre-imported there, so recursive calls look like normal Python:
 
 ```python
-rlm.batch(["verify the fix"])
-rlm.batch(["check auth.py", "check login.py"])
+await rlm.run("verify the fix")
+```
+
+For parallel sub-agents, use normal async Python:
+
+```python
+import asyncio
+
+results = await asyncio.gather(
+    rlm.run("check auth.py"),
+    rlm.run("check login.py"),
+)
 ```
 
 When recursion is disabled by depth, the system prompt does not advertise these APIs and child runs beyond the depth limit fail immediately.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -16,9 +17,9 @@ def main():
         description="A minimalistic CLI agent for true recursion.",
     )
     parser.add_argument(
-        "prompts",
-        nargs="*",
-        help="One or more task prompts (omit for interactive mode)",
+        "prompt",
+        nargs="?",
+        help="Task prompt (omit for interactive mode)",
     )
     parser.add_argument(
         "--model", default=None, help="Model name (overrides RLM_MODEL)"
@@ -37,14 +38,8 @@ def main():
     if args.max_turns:
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
 
-    if len(args.prompts) > 1:
-        results = rlm.batch(args.prompts)
-        for i, r in enumerate(results):
-            print(f"--- [{i}] ---")
-            print(r.answer)
-            print()
-    elif len(args.prompts) == 1:
-        print(rlm.batch(args.prompts[0])[0].answer)
+    if args.prompt:
+        print(asyncio.run(rlm.run(args.prompt)).answer)
     else:
         _run_interactive()
 

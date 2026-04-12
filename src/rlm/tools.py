@@ -125,6 +125,7 @@ os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 import nest_asyncio
 nest_asyncio.apply()
 
+import asyncio
 import rlm
 """
         self._execute_silent(setup_code)

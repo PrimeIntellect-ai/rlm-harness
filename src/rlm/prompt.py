@@ -30,8 +30,8 @@ def build_system_prompt(
 
     if allow_recursion:
         parts[6:6] = [
-            "The `rlm` module is pre-imported. Call rlm.batch(['sub-task']) to spawn a recursive sub-agent.",
-            "Pass multiple tasks to rlm.batch(['task1', 'task2', ...]) to run sub-agents in parallel.",
+            "The `rlm` module is pre-imported. Call `await rlm.run('sub-task')` to spawn a recursive sub-agent.",
+            "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm.run('task1'), rlm.run('task2'))`.",
             "",
         ]
 

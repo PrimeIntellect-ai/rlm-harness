@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import time
 
 from openai import AsyncOpenAI
@@ -67,7 +66,7 @@ class RLMEngine:
         session_dir = os.environ.get("RLM_SESSION_DIR")
         self.session = Session(session_dir)
 
-    async def _run_one(self, prompt: str) -> RLMResult:
+    async def run(self, prompt: str) -> RLMResult:
         """Run a single agent loop to completion."""
         # Check depth limit
         if self.depth > self.max_depth:
@@ -239,58 +238,6 @@ class RLMEngine:
             turns=turn + 1,
         )
         return result
-
-    async def batch(self, prompts: list[str]) -> list[RLMResult]:
-        """Run one or more agents. Always returns a list of results."""
-        if len(prompts) == 1:
-            return [await self._run_one(prompts[0])]
-        self._ensure_session()
-
-        async def _run_one(prompt: str) -> RLMResult:
-            child_dir = Session.child_dir(self.session.dir) if self.session else None
-            env = os.environ.copy()
-            if child_dir:
-                env["RLM_SESSION_DIR"] = str(child_dir)
-            env["RLM_DEPTH"] = str(self.depth)
-
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                "-m",
-                "rlm.cli",
-                prompt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.cwd,
-                env=env,
-            )
-            stdout, stderr = await proc.communicate()
-            answer = stdout.decode().strip()
-            stderr_text = stderr.decode().strip()
-            if proc.returncode != 0:
-                parts = [text for text in [answer, stderr_text] if text]
-                if not parts:
-                    parts.append("rlm child failed")
-                parts.append(f"[exit code: {proc.returncode}]")
-                answer = "\n".join(parts)
-
-            usage = TokenUsage()
-            turns = 0
-            if child_dir:
-                meta_path = child_dir / "meta.json"
-                if meta_path.exists():
-                    meta = json.loads(meta_path.read_text())
-                    u = meta.get("usage", {})
-                    usage = TokenUsage(
-                        prompt_tokens=u.get("prompt_tokens", 0),
-                        completion_tokens=u.get("completion_tokens", 0),
-                    )
-                    turns = meta.get("turns", 0)
-
-            return RLMResult(
-                answer=answer, session_dir=child_dir, usage=usage, turns=turns
-            )
-
-        return await asyncio.gather(*[_run_one(p) for p in prompts])
 
     def _detect_new_children(self):
         """Scan session dir for new sub-* directories and log them."""

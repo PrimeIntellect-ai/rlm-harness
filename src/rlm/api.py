@@ -1,6 +1,5 @@
 """Public Python API for running rlm agents."""
 
-import asyncio
 import os
 
 from rlm.engine import RLMEngine
@@ -17,12 +16,11 @@ def _child_session() -> Session | None:
     return None
 
 
-def batch(prompts: str | list[str], **kwargs) -> list[RLMResult]:
-    """Run one or more rlm agents. Always returns a list of results."""
-    normalized = [prompts] if isinstance(prompts, str) else prompts
-    if len(normalized) == 1 and "session" not in kwargs:
+async def run(prompt: str, **kwargs) -> RLMResult:
+    """Run a single rlm agent."""
+    if "session" not in kwargs:
         child = _child_session()
         if child:
             kwargs["session"] = child
     engine = RLMEngine(**kwargs)
-    return asyncio.run(engine.batch(normalized))
+    return await engine.run(prompt)
