@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 
 from openai import AsyncOpenAI
@@ -50,7 +51,7 @@ class RLMEngine:
         self._summaries: list[str] = []
         self._dropped_turn_count: int = 0
 
-        # IPython REPL (started lazily in run())
+        # IPython REPL (started lazily in single-agent execution)
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
 
@@ -61,8 +62,8 @@ class RLMEngine:
         session_dir = os.environ.get("RLM_SESSION_DIR")
         self.session = Session(session_dir)
 
-    async def run(self, prompt: str) -> RLMResult:
-        """Run the agent loop to completion."""
+    async def _run_one(self, prompt: str) -> RLMResult:
+        """Run a single agent loop to completion."""
         # Check depth limit
         if self.depth > self.max_depth:
             return RLMResult(
@@ -233,7 +234,9 @@ class RLMEngine:
         return result
 
     async def batch(self, prompts: list[str]) -> list[RLMResult]:
-        """Run multiple agents in parallel as subprocesses."""
+        """Run one or more agents. Always returns a list of results."""
+        if len(prompts) == 1:
+            return [await self._run_one(prompts[0])]
         self._ensure_session()
 
         async def _run_one(prompt: str) -> RLMResult:
@@ -241,18 +244,27 @@ class RLMEngine:
             env = os.environ.copy()
             if child_dir:
                 env["RLM_SESSION_DIR"] = str(child_dir)
-            env["RLM_DEPTH"] = str(self.depth + 1)
+            env["RLM_DEPTH"] = str(self.depth)
 
             proc = await asyncio.create_subprocess_exec(
-                "rlm",
+                sys.executable,
+                "-m",
+                "rlm.cli",
                 prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
                 env=env,
             )
-            stdout, _ = await proc.communicate()
+            stdout, stderr = await proc.communicate()
             answer = stdout.decode().strip()
+            stderr_text = stderr.decode().strip()
+            if proc.returncode != 0:
+                parts = [text for text in [answer, stderr_text] if text]
+                if not parts:
+                    parts.append("rlm child failed")
+                parts.append(f"[exit code: {proc.returncode}]")
+                answer = "\n".join(parts)
 
             usage = TokenUsage()
             turns = 0

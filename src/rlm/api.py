@@ -17,17 +17,12 @@ def _child_session() -> Session | None:
     return None
 
 
-def run(prompt: str, **kwargs) -> RLMResult:
-    """Run a single rlm agent. Blocking convenience wrapper."""
-    if "session" not in kwargs:
+def batch(prompts: str | list[str], **kwargs) -> list[RLMResult]:
+    """Run one or more rlm agents. Always returns a list of results."""
+    normalized = [prompts] if isinstance(prompts, str) else prompts
+    if len(normalized) == 1 and "session" not in kwargs:
         child = _child_session()
         if child:
             kwargs["session"] = child
     engine = RLMEngine(**kwargs)
-    return asyncio.run(engine.run(prompt))
-
-
-def batch(prompts: list[str], **kwargs) -> list[RLMResult]:
-    """Run multiple rlm agents in parallel. Blocking convenience wrapper."""
-    engine = RLMEngine(**kwargs)
-    return asyncio.run(engine.batch(prompts))
+    return asyncio.run(engine.batch(normalized))

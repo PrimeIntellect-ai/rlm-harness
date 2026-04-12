@@ -16,13 +16,9 @@ def main():
         description="A minimalistic CLI agent for true recursion.",
     )
     parser.add_argument(
-        "prompt",
-        nargs="?",
-        default=None,
-        help="Task prompt (omit for interactive mode)",
-    )
-    parser.add_argument(
-        "--batch", action="store_true", help="Run multiple prompts in parallel"
+        "prompts",
+        nargs="*",
+        help="One or more task prompts (omit for interactive mode)",
     )
     parser.add_argument(
         "--model", default=None, help="Model name (overrides RLM_MODEL)"
@@ -33,7 +29,7 @@ def main():
         default=None,
         help="Max turns (overrides RLM_MAX_TURNS)",
     )
-    args, remaining = parser.parse_known_args()
+    args = parser.parse_args()
 
     # Apply CLI overrides to env
     if args.model:
@@ -41,18 +37,14 @@ def main():
     if args.max_turns:
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
 
-    if args.batch:
-        prompts = [args.prompt] + remaining if args.prompt else remaining
-        if not prompts:
-            parser.error("--batch requires at least one prompt")
-        results = rlm.batch(prompts)
+    if len(args.prompts) > 1:
+        results = rlm.batch(args.prompts)
         for i, r in enumerate(results):
             print(f"--- [{i}] ---")
             print(r.answer)
             print()
-    elif args.prompt:
-        result = rlm.run(args.prompt)
-        print(result.answer)
+    elif len(args.prompts) == 1:
+        print(rlm.batch(args.prompts[0])[0].answer)
     else:
         _run_interactive()
 
