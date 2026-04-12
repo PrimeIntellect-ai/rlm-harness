@@ -95,7 +95,12 @@ class RLMEngine:
     async def _run_loop(self, prompt: str) -> RLMResult:
         active_tools = get_active_tools()
         messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = build_system_prompt(self.cwd, str(SKILLS_DIR), messages_path)
+        system_prompt = build_system_prompt(
+            self.cwd,
+            str(SKILLS_DIR),
+            messages_path,
+            allow_recursion=self.depth < self.max_depth,
+        )
 
         messages = [
             {"role": "system", "content": system_prompt},
