@@ -13,6 +13,7 @@ def build_system_prompt(
     """Build the system prompt."""
     parts = [
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating.",
+        "Call at most one built-in tool per turn.",
         "",
         "You have a persistent IPython session. Variables, imports, and function definitions persist across calls.",
         "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",

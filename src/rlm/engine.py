@@ -38,11 +38,6 @@ class RLMEngine:
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
-        # Context window awareness
-        self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
-        self._context_warning_sent = False
-        self._last_prompt_tokens = 0
-
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
         self.max_tokens = _max_tok if _max_tok > 0 else None
@@ -117,16 +112,20 @@ class RLMEngine:
 
         for turn in range(self.max_turns):
             # Call LLM
+            request_kwargs = {
+                "model": self.model,
+                "messages": messages,
+            }
+            if active_tools:
+                request_kwargs["tools"] = active_tools
+                request_kwargs["parallel_tool_calls"] = False
             response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=active_tools if active_tools else None,
+                **request_kwargs,
             )
 
             usage = extract_usage(response)
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
-            self._last_prompt_tokens = usage.prompt_tokens
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
@@ -145,6 +144,13 @@ class RLMEngine:
                 ]
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
+            if msg.tool_calls and len(msg.tool_calls) > 1:
+                final_text = (
+                    "[protocol violation: emitted multiple tool calls in one turn; "
+                    "at most 1 is allowed]"
+                )
+                break
+
             # Token budget check
             if (
                 self.max_tokens
@@ -158,61 +164,33 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls
-            summarize_num_turns = 0
-
-            async def _exec_one(tc):
-                n = tc.function.name
-                a = json.loads(tc.function.arguments)
-                t0 = time.time()
-                if n == "summarize":
-                    r = self._execute_summarize(a, messages)
-                else:
-                    r = await asyncio.to_thread(self._execute_tool, n, a)
-                return tc, r, time.time() - t0
-
-            tool_results = await asyncio.gather(
-                *[_exec_one(tc) for tc in msg.tool_calls]
-            )
-
-            for tc, result, duration in tool_results:
-                if tc.function.name == "summarize" and not result.startswith("[no-op]"):
-                    summarize_num_turns = json.loads(tc.function.arguments).get(
-                        "num_turns", 0
-                    )
-
-                # Append execution duration
-                if tc.function.name != "summarize":
-                    result += f"\n[executed in {duration:.1f}s]"
-
-                # Append token budget info
-                if self.max_tokens:
-                    result += f"\n[{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens used]"
-
-                # Context window warning (once, at 80%)
-                if (
-                    not self._context_warning_sent
-                    and self._last_prompt_tokens >= self.max_context * 0.80
-                ):
-                    pct = self._last_prompt_tokens / self.max_context
-                    result += (
-                        f"\n\n[CONTEXT LIMIT WARNING] "
-                        f"You have used {self._last_prompt_tokens:,} of "
-                        f"{self.max_context:,} tokens ({pct:.0%}). "
-                        f"Wrap up your task soon."
-                    )
-                    self._context_warning_sent = True
-
-                if self.max_output > 0 and len(result) > self.max_output:
-                    result = result[: self.max_output]
-                self.session.log_tool_result(turn, tc.function.name, result, duration)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    }
+            # Execute the single allowed tool call
+            tc = msg.tool_calls[0]
+            tool_name = tc.function.name
+            tool_args = json.loads(tc.function.arguments)
+            t0 = time.time()
+            if tool_name == "summarize":
+                result = self._execute_summarize(tool_args, messages)
+            else:
+                result = await asyncio.to_thread(
+                    self._execute_tool, tool_name, tool_args
                 )
+            duration = time.time() - t0
+
+            summarize_num_turns = 0
+            if tool_name == "summarize" and not result.startswith("[no-op]"):
+                summarize_num_turns = tool_args.get("num_turns", 0)
+
+            if self.max_output > 0 and len(result) > self.max_output:
+                result = result[: self.max_output]
+            self.session.log_tool_result(turn, tool_name, result, duration)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                }
+            )
 
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
