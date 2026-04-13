@@ -5,7 +5,7 @@ A minimal CLI coding agent with a persistent IPython execution environment and o
 The model gets two built-in tools:
 
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
-- `summarize` for dropping old turns from context
+- `summarize` for dropping old turns from context and optionally resetting REPL state
 
 Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents.
 

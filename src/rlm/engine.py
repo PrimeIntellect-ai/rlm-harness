@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import os
 import time
@@ -14,6 +15,13 @@ from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools
 from rlm.types import RLMResult, TokenUsage
+
+
+@dataclass
+class SummarizeResult:
+    content: str
+    num_turns: int = 0
+    flush_repl_state: bool = False
 
 
 class RLMEngine:
@@ -181,8 +189,10 @@ class RLMEngine:
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments)
             t0 = time.time()
+            summarize_result = None
             if tool_name == "summarize":
-                result = self._execute_summarize(tool_args, messages)
+                summarize_result = self._execute_summarize(tool_args, messages)
+                result = summarize_result.content
             else:
                 result = await asyncio.to_thread(
                     self._execute_tool, tool_name, tool_args
@@ -190,11 +200,15 @@ class RLMEngine:
             duration = time.time() - t0
 
             summarize_num_turns = 0
-            if tool_name == "summarize" and not result.startswith("[no-op]"):
-                summarize_num_turns = tool_args.get("num_turns", 0)
+            flush_repl_state = False
+            if summarize_result is not None:
+                summarize_num_turns = summarize_result.num_turns
+                flush_repl_state = summarize_result.flush_repl_state
 
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
+            if flush_repl_state:
+                result += "\n[repl state flushed]"
             if tool_name == "ipython" and self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
                 result += (
@@ -215,6 +229,8 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
+            if flush_repl_state:
+                self._repl.restart_kernel()
 
             if self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
@@ -253,25 +269,37 @@ class RLMEngine:
             self.session.log_sub_spawn(child_name, "(spawned via rlm())")
         self._known_children = current
 
-    def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
+    def _execute_summarize(self, args: dict, messages: list[dict]) -> SummarizeResult:
         num_turns = args.get("num_turns")
         summary = args.get("summary", "")
+        flush_repl_state = bool(args.get("flush_repl_state", False))
 
         droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
 
         if num_turns is None or num_turns <= 0:
-            return f"[no-op] num_turns is required and must be > 0 (got {num_turns}). No context was dropped."
+            return SummarizeResult(
+                content=(
+                    "[no-op] num_turns is required and must be > 0 "
+                    f"(got {num_turns}). No context was dropped."
+                )
+            )
         if num_turns > droppable:
-            return (
-                f"[no-op] num_turns={num_turns} exceeds droppable turns "
-                f"({droppable}). No context was dropped."
+            return SummarizeResult(
+                content=(
+                    f"[no-op] num_turns={num_turns} exceeds droppable turns "
+                    f"({droppable}). No context was dropped."
+                )
             )
 
         start = self._dropped_turn_count
         end = start + num_turns - 1
         self._summaries.append(f"[turns {start}-{end}] {summary}")
         self._dropped_turn_count += num_turns
-        return "\n\n".join(self._summaries)
+        return SummarizeResult(
+            content="\n\n".join(self._summaries),
+            num_turns=num_turns,
+            flush_repl_state=flush_repl_state,
+        )
 
     @staticmethod
     def _count_turns_in_context(messages: list[dict]) -> int:
