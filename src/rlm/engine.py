@@ -14,7 +14,7 @@ from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools
-from rlm.types import RLMResult, TokenUsage
+from rlm.types import RLMMetrics, RLMResult, TokenUsage
 
 
 @dataclass
@@ -60,6 +60,16 @@ class RLMEngine:
         self.client = client or make_client()
         self.session = session
         self._total_usage = TokenUsage()
+        self._last_prompt_tokens = 0
+
+        # Metrics
+        self._metrics = RLMMetrics(
+            max_turns=self.max_turns,
+            max_tokens=self.max_tokens or 0,
+        )
+        self._turn_at_last_summarize: int = 0
+        self._turn_warning_sent: bool = False
+        self._token_warning_sent: bool = False
 
         # Summarize tool state
         self._summaries: list[str] = []
@@ -146,6 +156,13 @@ class RLMEngine:
             usage = extract_usage(response)
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
+            self._last_prompt_tokens = usage.prompt_tokens
+
+            # Update metrics
+            self._metrics.turns = turn + 1
+            self._metrics.turns_since_last_summarize = (turn + 1) - self._turn_at_last_summarize
+            self._metrics.prompt_tokens = self._total_usage.prompt_tokens
+            self._metrics.completion_tokens = self._total_usage.completion_tokens
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
@@ -176,11 +193,13 @@ class RLMEngine:
                 self.max_tokens
                 and self._total_usage.completion_tokens >= self.max_tokens
             ):
+                self._metrics.stop_reason = "token_budget"
                 final_text = msg.content or "[token budget exhausted]"
                 break
 
             # No tool calls → done
             if not msg.tool_calls:
+                self._metrics.stop_reason = "done"
                 final_text = msg.content or ""
                 break
 
@@ -214,6 +233,32 @@ class RLMEngine:
                 result += (
                     f"\n[context turns: {turns_in_context}/{self.max_turns_in_context}]"
                 )
+
+            # Budget warnings
+            if (
+                not self._turn_warning_sent
+                and turn >= self.max_turns * 0.8
+            ):
+                result += (
+                    f"\n[TURN BUDGET WARNING] "
+                    f"{turn + 1}/{self.max_turns} turns used. Wrap up soon."
+                )
+                self._turn_warning_sent = True
+                self._metrics.turn_budget_warnings += 1
+
+            if (
+                self.max_tokens
+                and not self._token_warning_sent
+                and self._total_usage.completion_tokens >= self.max_tokens * 0.8
+            ):
+                result += (
+                    f"\n[TOKEN BUDGET WARNING] "
+                    f"{self._total_usage.completion_tokens}/{self.max_tokens} "
+                    f"completion tokens used. Wrap up soon."
+                )
+                self._token_warning_sent = True
+                self._metrics.token_budget_warnings += 1
+
             self.session.log_tool_result(turn, tool_name, result, duration)
             messages.append(
                 {
@@ -241,6 +286,7 @@ class RLMEngine:
                     )
                     break
         else:
+            self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"
 
         result = RLMResult(
@@ -256,6 +302,7 @@ class RLMEngine:
                 "completion_tokens": self._total_usage.completion_tokens,
             },
             turns=turn + 1,
+            metrics=self._metrics,
         )
         return result
 
@@ -277,6 +324,7 @@ class RLMEngine:
         droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
 
         if num_turns is None or num_turns <= 0:
+            self._metrics.summarize_rejected_count += 1
             return SummarizeResult(
                 content=(
                     "[no-op] num_turns is required and must be > 0 "
@@ -284,12 +332,41 @@ class RLMEngine:
                 )
             )
         if num_turns > droppable:
+            self._metrics.summarize_rejected_count += 1
             return SummarizeResult(
                 content=(
                     f"[no-op] num_turns={num_turns} exceeds droppable turns "
                     f"({droppable}). No context was dropped."
                 )
             )
+
+        # Record metrics before dropping
+        self._metrics.summarize_count += 1
+        self._metrics.summarize_prompt_tokens_before.append(self._last_prompt_tokens)
+        self._metrics.summarize_completion_tokens_before.append(
+            self._total_usage.completion_tokens
+        )
+        self._metrics.turns_between_summarizes.append(
+            self._metrics.turns_since_last_summarize
+        )
+        self._metrics.summarize_summary_lengths.append(len(summary))
+        self._metrics.summarize_total_turns_dropped += num_turns
+
+        # Estimate dropped tokens proportional to turns dropped
+        if self._metrics.turns > 0:
+            prompt_per_turn = self._last_prompt_tokens / self._metrics.turns
+            completion_per_turn = (
+                self._total_usage.completion_tokens / self._metrics.turns
+            )
+            self._metrics.summarize_prompt_tokens_dropped.append(
+                int(prompt_per_turn * num_turns)
+            )
+            self._metrics.summarize_completion_tokens_dropped.append(
+                int(completion_per_turn * num_turns)
+            )
+
+        # Reset turn counter for next summarize interval
+        self._turn_at_last_summarize = self._metrics.turns
 
         start = self._dropped_turn_count
         end = start + num_turns - 1
