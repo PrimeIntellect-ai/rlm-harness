@@ -25,6 +25,9 @@ uv run rlm "fix the auth bug in login.py"
 
 # Override model/limits
 RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run rlm "refactor the parser"
+
+# Replace the generated system prompt from a file
+uv run rlm --system-prompt-path /tmp/system.txt "solve the task"
 ```
 
 ## Python SDK
@@ -50,12 +53,13 @@ All configuration is via environment variables:
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
 | `RLM_MAX_TURNS_IN_CONTEXT` | `-1` | Max assistant turns retained in the live context (`-1` disables; `0` and `1` are invalid) |
 | `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
+| `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `SERPER_API_KEY` | — | Optional API key for the bundled `skills/websearch` script |
 | `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `skills/websearch` requests |
 | `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `skills/websearch` |
 
-CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 "prompt"`.
+CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 --system-prompt-path /tmp/system.txt "prompt"`.
 
 ## Recursion
 

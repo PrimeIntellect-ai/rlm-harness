@@ -30,6 +30,11 @@ def main():
         default=None,
         help="Max turns (overrides RLM_MAX_TURNS)",
     )
+    parser.add_argument(
+        "--system-prompt-path",
+        default=None,
+        help="Path to a file whose contents replace the generated system prompt",
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides to env
@@ -37,6 +42,8 @@ def main():
         os.environ["RLM_MODEL"] = args.model
     if args.max_turns:
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
+    if args.system_prompt_path:
+        os.environ["RLM_SYSTEM_PROMPT_PATH"] = args.system_prompt_path
 
     if args.prompt:
         print(asyncio.run(rlm.run(args.prompt)).answer)
