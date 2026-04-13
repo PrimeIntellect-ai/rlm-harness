@@ -35,6 +35,11 @@ def main():
         default=None,
         help="Path to a file whose contents replace the generated system prompt",
     )
+    parser.add_argument(
+        "--custom-instructions",
+        default=None,
+        help="Extra instructions appended to the generated system prompt",
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides to env
@@ -44,6 +49,8 @@ def main():
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
     if args.system_prompt_path:
         os.environ["RLM_SYSTEM_PROMPT_PATH"] = args.system_prompt_path
+    if args.custom_instructions:
+        os.environ["RLM_CUSTOM_INSTRUCTIONS"] = args.custom_instructions
 
     if args.prompt:
         print(asyncio.run(rlm.run(args.prompt)).answer)

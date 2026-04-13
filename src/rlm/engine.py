@@ -32,6 +32,7 @@ class RLMEngine:
         max_turns: int | None = None,
         max_turns_in_context: int | None = None,
         system_prompt_path: str | None = None,
+        custom_instructions: str | None = None,
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
@@ -54,6 +55,9 @@ class RLMEngine:
         self.max_turns_in_context = None if limit == -1 else limit
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
+        )
+        self.custom_instructions = custom_instructions or os.environ.get(
+            "RLM_CUSTOM_INSTRUCTIONS"
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
@@ -260,7 +264,7 @@ class RLMEngine:
     def _load_system_prompt(self, messages_path: str, summarize_enabled: bool) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
-        return build_system_prompt(
+        system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR),
             messages_path,
@@ -268,6 +272,9 @@ class RLMEngine:
             max_turns_in_context=self.max_turns_in_context,
             summarize_enabled=summarize_enabled,
         )
+        if self.custom_instructions:
+            system_prompt += "\n\n" + self.custom_instructions
+        return system_prompt
 
     def _detect_new_children(self):
         """Scan session dir for new sub-* directories and log them."""
