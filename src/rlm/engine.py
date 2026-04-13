@@ -32,7 +32,7 @@ class RLMEngine:
         max_turns: int | None = None,
         max_turns_in_context: int | None = None,
         system_prompt_path: str | None = None,
-        custom_instructions: str | None = None,
+        append_to_system_prompt: str | None = None,
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
@@ -56,8 +56,8 @@ class RLMEngine:
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
         )
-        self.custom_instructions = custom_instructions or os.environ.get(
-            "RLM_CUSTOM_INSTRUCTIONS"
+        self.append_to_system_prompt = append_to_system_prompt or os.environ.get(
+            "RLM_APPEND_TO_SYSTEM_PROMPT"
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
@@ -272,8 +272,8 @@ class RLMEngine:
             max_turns_in_context=self.max_turns_in_context,
             summarize_enabled=summarize_enabled,
         )
-        if self.custom_instructions:
-            system_prompt += "\n\n" + self.custom_instructions
+        if self.append_to_system_prompt:
+            system_prompt += "\n\n" + self.append_to_system_prompt
         return system_prompt
 
     def _detect_new_children(self):
