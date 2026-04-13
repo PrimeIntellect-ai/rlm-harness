@@ -1,9 +1,10 @@
 """Websearch tool — Google search via Serper API."""
 
+import asyncio
 import json
 import os
-import urllib.error
-import urllib.request
+
+import httpx
 
 PARAMETERS = {
     "type": "object",
@@ -76,30 +77,32 @@ def _format_serper_results(data: dict, query: str, num_results: int = 5) -> str:
     return "\n\n---\n\n".join(sections)
 
 
-def _fetch_serper(
+async def _fetch_serper(
     query: str, api_key: str, timeout: int = 45, num_results: int = 5
 ) -> str:
     """Execute a single Serper API search."""
-    req = urllib.request.Request(
-        "https://google.serper.dev/search",
-        data=json.dumps({"q": query}).encode(),
-        headers={
-            "X-API-KEY": api_key,
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode() if e.fp else ""
-        raise RuntimeError(f"Serper search error ({e.code}): {body}") from e
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                "https://google.serper.dev/search",
+                json={"q": query},
+                headers={
+                    "X-API-KEY": api_key,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        body = e.response.text if e.response is not None else ""
+        raise RuntimeError(
+            f"Serper search error ({e.response.status_code}): {body}"
+        ) from e
 
     return _format_serper_results(data, query, num_results=num_results)
 
 
-def run(
+async def run(
     queries: list[str],
     *,
     max_output: int = 8192,
@@ -118,15 +121,17 @@ def run(
         num_results = int(os.environ.get("RLM_WEBSEARCH_NUM_RESULTS", "5"))
 
     queries = queries[:10]
-    parts: list[str] = []
-    for query in queries:
+
+    async def _run_query(query: str) -> str:
         try:
-            result = _fetch_serper(
+            result = await _fetch_serper(
                 query, api_key, timeout=timeout, num_results=num_results
             )
         except Exception as e:
             result = f"Error searching for '{query}': {e}"
-        parts.append(f'Results for query "{query}":\n\n{result}')
+        return f'Results for query "{query}":\n\n{result}'
+
+    parts = await asyncio.gather(*[_run_query(query) for query in queries])
 
     output = "\n\n---\n\n".join(parts)
 
@@ -162,11 +167,13 @@ def main():
     args = parser.parse_args()
 
     print(
-        run(
-            args.queries,
-            max_output=args.max_output,
-            timeout=args.timeout,
-            num_results=args.num_results,
+        asyncio.run(
+            run(
+                args.queries,
+                max_output=args.max_output,
+                timeout=args.timeout,
+                num_results=args.num_results,
+            )
         )
     )
 

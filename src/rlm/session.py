@@ -75,10 +75,11 @@ class Session:
         self.write_meta(**meta_update)
         self._msg_file.close()
 
-    def child_dir(self) -> Path:
-        """Create and return a new child session directory."""
+    @staticmethod
+    def child_dir(parent_dir: Path | str) -> Path:
+        """Create and return a new child session directory under parent_dir."""
         child_id = uuid.uuid4().hex[:8]
-        child = self.dir / f"sub-{child_id}"
+        child = Path(parent_dir) / f"sub-{child_id}"
         child.mkdir()
         return child
 

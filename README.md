@@ -1,8 +1,13 @@
 # rlm
 
-A minimalistic CLI agent for true recursion.
+A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
-Three tools: `bash`, `edit`, and `websearch`. Recursion via `bash('rlm "sub-task"')`. That's it.
+The model gets two built-in tools:
+
+- `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
+- `summarize` for dropping old turns from context
+
+Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents.
 
 ## Install
 
@@ -10,23 +15,16 @@ Three tools: `bash`, `edit`, and `websearch`. Recursion via `bash('rlm "sub-task
 uv pip install -e .
 ```
 
-## Usage
+## CLI
 
 ```bash
 # Source your API keys
 source .env
 
-# Headless (single task)
-rlm "fix the auth bug in login.py"
-
-# Parallel sub-tasks
-rlm --batch "check auth.py" "check login.py" "check session.py"
+uv run rlm "fix the auth bug in login.py"
 
 # Override model/limits
-RLM_MODEL=claude-sonnet-4-20250514 RLM_MAX_TURNS=50 rlm "refactor the parser"
-
-# Restrict tools
-RLM_TOOLS=bash rlm "explore the codebase"
+RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run rlm "refactor the parser"
 ```
 
 ## Python SDK
@@ -34,176 +32,81 @@ RLM_TOOLS=bash rlm "explore the codebase"
 ```python
 import rlm
 
-result = rlm.run("fix the bug")
-results = rlm.batch(["check a.py", "check b.py"])
+result = await rlm.run("fix the bug")
 ```
 
 ## Configuration
 
-All via environment variables:
+All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RLM_MODEL` | `gpt-4o` | LLM model |
-| `RLM_API_KEY` | — | API key (falls back to `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) |
-| `RLM_BASE_URL` | — | API endpoint |
+| `RLM_MODEL` | `gpt-4o` | Model name |
+| `RLM_API_KEY` | — | API key for the OpenAI-compatible client |
+| `RLM_BASE_URL` | — | Optional API base URL |
 | `RLM_MAX_TURNS` | `30` | Max tool-calling turns per agent |
-| `RLM_MAX_DEPTH` | `3` | Max recursion depth |
-| `RLM_BASH_TIMEOUT` | `120` | Seconds per bash command |
-| `RLM_MAX_OUTPUT` | `8192` | Truncate tool output (chars) |
-| `RLM_TOOLS` | `bash,edit,websearch` | Active tools (comma-separated) |
-| `RLM_SUB_TOOLS` | — | Tools for children (if different) |
-| `RLM_HOME` | `~/.rlm` | Root directory for sessions and data |
-| `RLM_SYSTEM_PROMPT_VERBOSITY` | `medium` | light / medium / heavy |
-| `SERPER_API_KEY` | — | API key for `websearch` tool ([serper.dev](https://serper.dev)) |
-| `RLM_WEBSEARCH_TIMEOUT` | `45` | Per-query HTTP timeout (seconds) |
-| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results per query |
+| `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
+| `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
+| `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
+| `RLM_MAX_CONTEXT` | `128000` | Context-window warning threshold base |
+| `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
+| `RLM_HOME` | `.rlm` | Root directory for sessions and data |
+| `SERPER_API_KEY` | — | Optional API key for the bundled `skills/websearch` script |
+| `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `skills/websearch` requests |
+| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `skills/websearch` |
 
-CLI flags override env vars: `rlm --model opus --max-turns 50 "prompt"`
+CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 "prompt"`.
 
-## How recursion works
+## Recursion
 
-The LLM can invoke `rlm` as a sub-agent via bash — same binary, same tools, fresh context:
+Each agent runs inside a persistent IPython kernel. The `rlm` module is pre-imported there, so recursive calls look like normal Python:
 
-```
-Root rlm                          Child rlm
-  │                                 │
-  │ bash('rlm "check auth.py"')    │
-  │──────────────────────────────►  │
-  │                                 │ bash("cat auth.py")
-  │                                 │ bash("grep -n TODO auth.py")
-  │                                 │ → "Found 2 issues..."
-  │  ◄──────────────────────────────│
-  │  stdout: "Found 2 issues..."   │
-  │                                 │
+```python
+await rlm.run("verify the fix")
 ```
 
-Each child gets its own session directory nested under the parent's. The root's TUI (planned) watches the full tree.
+For parallel sub-agents, use normal async Python:
+
+```python
+import asyncio
+
+results = await asyncio.gather(
+    rlm.run("check auth.py"),
+    rlm.run("check login.py"),
+)
+```
+
+When recursion is disabled by depth, the system prompt does not advertise these APIs and child runs beyond the depth limit fail immediately.
 
 ## Session Directory
 
-Every invocation writes to `$RLM_HOME/sessions/<id>/` (default `~/.rlm`). Set `RLM_HOME=.rlm` to keep sessions in the project directory. Nested directories mirror the call tree.
+Every invocation writes to `$RLM_HOME/sessions/<id>/`. Nested session directories mirror the call tree.
 
-```
-~/.rlm/sessions/abc123/
+```text
+.rlm/sessions/abc123/
 ├── meta.json
 ├── messages.jsonl
-├── sub-d4e5/           ← child from bash('rlm "sub-task"')
+├── sub-d4e5/
 │   ├── meta.json
 │   ├── messages.jsonl
-│   └── sub-f6g7/      ← grandchild
-│       └── ...
-└── sub-h8i9/           ← parallel child
-    └── ...
+│   └── sub-f6g7/
+└── sub-h8i9/
 ```
 
-Consumable externally for SFT data extraction, visualization, or metrics.
+These artifacts are consumable for debugging, visualization, or training-data extraction.
 
-## TUI (planned)
+## Skills
 
-Interactive mode (`rlm` with no args). Splits on recursion:
+Bundled helper scripts live under [`skills/`](skills). The system prompt points the model at that directory so it can use those scripts from IPython when needed.
 
-### No recursion — flat view
-```
-┌────────────────────────────────────────────────┐
-│ root                                           │
-│                                                │
-│ 👤 Fix the auth bug                            │
-│ 🤖 bash: find . -name auth.py                  │
-│    → ./src/auth.py                             │
-│ 🤖 edit: src/auth.py                           │
-│    → Edited                                    │
-│ 🤖 bash: pytest                                │
-│    → 13 passed                                 │
-│ ✓ Fixed null check on line 47                  │
-├────────────────────────────────────────────────┤
-│ ❯ _                                            │
-└────────────────────────────────────────────────┘
+From IPython, import a tool module and `await` its `run(...)` function:
+
+```python
+from skills.websearch.scripts.websearch import run as websearch
+
+await websearch(["latest jupyter_client release"])
 ```
 
-### One level of recursion — split in half
-```
-┌───────────────────────┬────────────────────────┐
-│ root                  │ sub-a3f2               │
-│                       │                        │
-│ 👤 Fix the auth bug   │ 👤 verify the fix      │
-│ 🤖 bash: find ...     │ 🤖 bash: cat auth.py   │
-│    → ./src/auth.py    │    → <file content>    │
-│ 🤖 edit: auth.py      │ 🤖 bash: pytest -x     │
-│    → Edited           │    → 13 passed         │
-│ 🤖 bash: rlm "verify" │ ✓ Fix looks correct    │
-│    ⟳ running...       │                        │
-│                       │                        │
-├───────────────────────┴────────────────────────┤
-│ ❯ _                                            │
-└────────────────────────────────────────────────┘
-```
+## Interactive Mode
 
-### Two levels — right half splits again
-```
-┌───────────────────────┬────────────┬───────────┐
-│ root                  │ sub-a3f2   │ sub-c8d1  │
-│                       │            │           │
-│ 👤 Fix auth + login   │ 👤 fix     │ 👤 check  │
-│ 🤖 bash: rlm "fix     │   auth.py  │   tests   │
-│   auth.py"            │ 🤖 bash:   │ 🤖 bash:  │
-│ 🤖 bash: rlm "fix     │   cat ...  │   pytest  │
-│   login.py"           │ 🤖 edit:   │   → pass  │
-│    ⟳ running...       │   auth.py  │ ✓ ok      │
-│                       │ 🤖 bash:   │           │
-│                       │   rlm      │           │
-│                       │   "check"  │           │
-│                       │    ⟳       │           │
-├───────────────────────┴────────────┴───────────┤
-│ ❯ _                                            │
-└────────────────────────────────────────────────┘
-```
-
-### Parallel children (batch) — right half stacks vertically
-```
-┌───────────────────────┬────────────────────────┐
-│ root                  │ sub-a3f2 (auth.py)     │
-│                       │ 🤖 bash: cat auth.py   │
-│ 👤 Check all files    │    → ...               │
-│ 🤖 bash: rlm --batch  │ 🤖 bash: grep TODO     │
-│   "check auth.py"    │ ✓ Found 2 issues       │
-│   "check login.py"   ├────────────────────────┤
-│   "check session.py" │ sub-b7e4 (login.py)    │
-│    ⟳ running...      │ 🤖 bash: cat login.py  │
-│                       │    ⟳ running...        │
-│                       ├────────────────────────┤
-│                       │ sub-c8d1 (session.py)  │
-│                       │ 🤖 bash: cat session.py│
-│                       │    ⟳ running...        │
-├───────────────────────┴────────────────────────┤
-│ ❯ _                                            │
-└────────────────────────────────────────────────┘
-```
-
-### Nested batch: 1 → 2 → 4
-Root batches 2 children, each child batches 2 grandchildren. Right side shows the tree:
-```
-┌──────────────────┬──────────────────┬─────────────────┐
-│ root             │ sub-a (backend)  │ sub-a1 (auth)   │
-│                  │                  │ 🤖 bash: grep   │
-│ 👤 Audit the     │ 👤 audit backend │    auth.py      │
-│   whole app      │ 🤖 bash:         │ ✓ 2 issues      │
-│ 🤖 bash:          │   rlm --batch   ├─────────────────┤
-│   rlm --batch    │   "audit auth"  │ sub-a2 (db)     │
-│   "audit backend"│   "audit db"    │ 🤖 bash: grep   │
-│   "audit frontend│    ⟳            │    db.py        │
-│    ⟳ running...  │                  │    ⟳ running... │
-│                  ├──────────────────┼─────────────────┤
-│                  │ sub-b (frontend) │ sub-b1 (react)  │
-│                  │                  │ 🤖 bash: grep   │
-│                  │ 👤 audit frontend│    App.tsx       │
-│                  │ 🤖 bash:         │ ✓ 1 issue       │
-│                  │   rlm --batch   ├─────────────────┤
-│                  │   "audit react" │ sub-b2 (css)    │
-│                  │   "audit css"   │ 🤖 bash: grep   │
-│                  │    ⟳            │    styles.css   │
-│                  │                  │    ⟳ running... │
-├──────────────────┴──────────────────┴─────────────────┤
-│ ❯ _                                                   │
-└───────────────────────────────────────────────────────┘
-```
+Running `rlm` with no prompts enters a placeholder interactive mode. The TUI is not implemented yet.

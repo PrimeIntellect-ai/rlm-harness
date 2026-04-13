@@ -6,8 +6,7 @@ import asyncio
 import os
 import sys
 
-from rlm.engine import RLMEngine
-from rlm.session import Session
+import rlm
 
 
 def main():
@@ -20,11 +19,7 @@ def main():
     parser.add_argument(
         "prompt",
         nargs="?",
-        default=None,
         help="Task prompt (omit for interactive mode)",
-    )
-    parser.add_argument(
-        "--batch", action="store_true", help="Run multiple prompts in parallel"
     )
     parser.add_argument(
         "--model", default=None, help="Model name (overrides RLM_MODEL)"
@@ -35,7 +30,7 @@ def main():
         default=None,
         help="Max turns (overrides RLM_MAX_TURNS)",
     )
-    args, remaining = parser.parse_known_args()
+    args = parser.parse_args()
 
     # Apply CLI overrides to env
     if args.model:
@@ -43,39 +38,10 @@ def main():
     if args.max_turns:
         os.environ["RLM_MAX_TURNS"] = str(args.max_turns)
 
-    if args.batch:
-        prompts = [args.prompt] + remaining if args.prompt else remaining
-        if not prompts:
-            parser.error("--batch requires at least one prompt")
-        asyncio.run(_run_batch(prompts))
-    elif args.prompt:
-        asyncio.run(_run_headless(args.prompt))
+    if args.prompt:
+        print(asyncio.run(rlm.run(args.prompt)).answer)
     else:
         _run_interactive()
-
-
-async def _run_headless(prompt: str):
-    engine = RLMEngine()
-    result = await engine.run(prompt)
-    print(result.answer)
-
-
-async def _run_batch(prompts: list[str]):
-    engine = RLMEngine()
-    session_dir = os.environ.get("RLM_SESSION_DIR")
-    engine.session = Session(session_dir)
-    engine.session.write_meta(
-        session_id=engine.session.dir.name,
-        model=engine.model,
-        status="batch",
-        batch_size=len(prompts),
-    )
-
-    results = await engine.batch(prompts)
-    for i, r in enumerate(results):
-        print(f"--- [{i}] ---")
-        print(r.answer)
-        print()
 
 
 def _run_interactive():

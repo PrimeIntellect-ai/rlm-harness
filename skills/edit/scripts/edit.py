@@ -1,5 +1,6 @@
 """Edit tool — safe single-occurrence string replacement."""
 
+import asyncio
 from pathlib import Path
 
 PARAMETERS = {
@@ -16,7 +17,7 @@ PARAMETERS = {
 }
 
 
-def run(
+async def run(
     path: str,
     old_str: str,
     new_str: str,
@@ -54,7 +55,7 @@ def main():
     parser.add_argument("--cwd", default=os.getcwd(), help="Working directory.")
     args = parser.parse_args()
 
-    print(run(args.path, args.old_str, args.new_str, cwd=args.cwd))
+    print(asyncio.run(run(args.path, args.old_str, args.new_str, cwd=args.cwd)))
 
 
 if __name__ == "__main__":
