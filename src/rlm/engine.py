@@ -21,6 +21,7 @@ class RLMEngine:
         self,
         model: str | None = None,
         max_turns: int | None = None,
+        max_turns_in_context: int | None = None,
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
@@ -35,6 +36,12 @@ class RLMEngine:
                 "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
             )
         self.max_output = max_output
+        limit = max_turns_in_context
+        if limit is None:
+            limit = int(os.environ.get("RLM_MAX_TURNS_IN_CONTEXT", "-1"))
+        if limit < -1 or limit in (0, 1):
+            raise ValueError("RLM_MAX_TURNS_IN_CONTEXT must be -1 (unlimited) or >= 2")
+        self.max_turns_in_context = None if limit == -1 else limit
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
@@ -94,12 +101,17 @@ class RLMEngine:
 
     async def _run_loop(self, prompt: str) -> RLMResult:
         active_tools = get_active_tools()
+        summarize_enabled = any(
+            tool["function"]["name"] == "summarize" for tool in active_tools
+        )
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
+            max_turns_in_context=self.max_turns_in_context,
+            summarize_enabled=summarize_enabled,
         )
 
         messages = [
@@ -182,7 +194,12 @@ class RLMEngine:
                 summarize_num_turns = tool_args.get("num_turns", 0)
 
             if self.max_output > 0 and len(result) > self.max_output:
-                result = result[: self.max_output]
+                result = result[: self.max_output] + "\n... [output truncated]"
+            if tool_name == "ipython" and self.max_turns_in_context is not None:
+                turns_in_context = self._count_turns_in_context(messages)
+                result += (
+                    f"\n[context turns: {turns_in_context}/{self.max_turns_in_context}]"
+                )
             self.session.log_tool_result(turn, tool_name, result, duration)
             messages.append(
                 {
@@ -198,6 +215,15 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
+
+            if self.max_turns_in_context is not None:
+                turns_in_context = self._count_turns_in_context(messages)
+                if turns_in_context > self.max_turns_in_context:
+                    final_text = (
+                        f"[context limit exceeded: {turns_in_context}/"
+                        f"{self.max_turns_in_context} turns in context]"
+                    )
+                    break
         else:
             final_text = msg.content or "[max turns reached]"
 
@@ -246,6 +272,10 @@ class RLMEngine:
         self._summaries.append(f"[turns {start}-{end}] {summary}")
         self._dropped_turn_count += num_turns
         return "\n\n".join(self._summaries)
+
+    @staticmethod
+    def _count_turns_in_context(messages: list[dict]) -> int:
+        return sum(1 for message in messages if message["role"] == "assistant")
 
     @staticmethod
     def _drop_turns(messages: list[dict], num_turns: int) -> None:

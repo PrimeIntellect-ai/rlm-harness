@@ -48,6 +48,7 @@ All configuration is via environment variables:
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
+| `RLM_MAX_TURNS_IN_CONTEXT` | `-1` | Max assistant turns retained in the live context (`-1` disables; `0` and `1` are invalid) |
 | `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `SERPER_API_KEY` | — | Optional API key for the bundled `skills/websearch` script |

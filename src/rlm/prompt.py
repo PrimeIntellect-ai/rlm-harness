@@ -9,6 +9,8 @@ def build_system_prompt(
     messages_path: str,
     *,
     allow_recursion: bool,
+    max_turns_in_context: int | None,
+    summarize_enabled: bool,
 ) -> str:
     """Build the system prompt."""
     parts = [
@@ -28,6 +30,19 @@ def build_system_prompt(
         "",
         f"Your conversation is logged to {messages_path}.",
     ]
+
+    if max_turns_in_context is not None:
+        parts.extend(
+            [
+                "",
+                "The current context may contain at most "
+                f"{max_turns_in_context} assistant turns.",
+            ]
+        )
+        if summarize_enabled:
+            parts.append(
+                "Use `summarize` to drop older turns and stay within this limit."
+            )
 
     if allow_recursion:
         parts[6:6] = [
