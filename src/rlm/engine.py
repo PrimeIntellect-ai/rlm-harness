@@ -68,8 +68,6 @@ class RLMEngine:
             max_tokens=self.max_tokens or 0,
         )
         self._turn_at_last_summarize: int = 0
-        self._turn_warning_sent: bool = False
-        self._token_warning_sent: bool = False
         self._prev_prompt_tokens: int = 0
         self._prev_completion_tokens: int = 0
         self._summarize_happened: bool = False
@@ -251,31 +249,6 @@ class RLMEngine:
                 result += (
                     f"\n[context turns: {turns_in_context}/{self.max_turns_in_context}]"
                 )
-
-            # Budget warnings
-            if (
-                not self._turn_warning_sent
-                and turn >= self.max_turns * 0.8
-            ):
-                result += (
-                    f"\n[TURN BUDGET WARNING] "
-                    f"{turn + 1}/{self.max_turns} turns used. Wrap up soon."
-                )
-                self._turn_warning_sent = True
-                self._metrics.turn_budget_warnings += 1
-
-            if (
-                self.max_tokens
-                and not self._token_warning_sent
-                and self._total_usage.completion_tokens >= self.max_tokens * 0.8
-            ):
-                result += (
-                    f"\n[TOKEN BUDGET WARNING] "
-                    f"{self._total_usage.completion_tokens}/{self.max_tokens} "
-                    f"completion tokens used. Wrap up soon."
-                )
-                self._token_warning_sent = True
-                self._metrics.token_budget_warnings += 1
 
             self.session.log_tool_result(turn, tool_name, result, duration)
             messages.append(

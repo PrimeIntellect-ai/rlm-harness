@@ -52,8 +52,6 @@ class RLMMetrics:
     # Budget tracking
     max_turns: int = 0
     max_tokens: int = 0
-    turn_budget_warnings: int = 0
-    token_budget_warnings: int = 0
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "depth_limit"
 
     def to_dict(self) -> dict:
