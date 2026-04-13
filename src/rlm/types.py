@@ -39,10 +39,10 @@ class RLMMetrics:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
-    # Environment/tool response tokens (estimated from prompt token deltas)
-    # Computed as: prompt_tokens[N+1] - prompt_tokens[N] - completion_tokens[N]
-    # Skipped on turns where summarize dropped context (delta unreliable)
-    tool_result_tokens: int = 0
+    # Per-turn token counts from the API (for computing tool result tokens etc.)
+    # tool_result_tokens[i] ≈ prompt_tokens_per_turn[i+1] - prompt_tokens_per_turn[i] - completion_tokens_per_turn[i]
+    prompt_tokens_per_turn: list[int] = field(default_factory=list)
+    completion_tokens_per_turn: list[int] = field(default_factory=list)
 
     # Aggregated from children
     sub_rlm_prompt_tokens: int = 0
