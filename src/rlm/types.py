@@ -39,6 +39,11 @@ class RLMMetrics:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+    # Environment/tool response tokens (estimated from prompt token deltas)
+    # Computed as: prompt_tokens[N+1] - prompt_tokens[N] - completion_tokens[N]
+    # Skipped on turns where summarize dropped context (delta unreliable)
+    tool_result_tokens: int = 0
+
     # Aggregated from children
     sub_rlm_prompt_tokens: int = 0
     sub_rlm_completion_tokens: int = 0

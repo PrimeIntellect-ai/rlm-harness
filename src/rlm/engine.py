@@ -70,6 +70,9 @@ class RLMEngine:
         self._turn_at_last_summarize: int = 0
         self._turn_warning_sent: bool = False
         self._token_warning_sent: bool = False
+        self._prev_prompt_tokens: int = 0
+        self._prev_completion_tokens: int = 0
+        self._summarize_happened: bool = False
 
         # Summarize tool state
         self._summaries: list[str] = []
@@ -157,6 +160,21 @@ class RLMEngine:
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
             self._last_prompt_tokens = usage.prompt_tokens
+
+            # Estimate tool result tokens from prompt delta
+            # new_prompt = prev_prompt + prev_completion + tool_results
+            # so tool_results ≈ new_prompt - prev_prompt - prev_completion
+            if turn > 0 and not self._summarize_happened:
+                delta = (
+                    usage.prompt_tokens
+                    - self._prev_prompt_tokens
+                    - self._prev_completion_tokens
+                )
+                if delta > 0:
+                    self._metrics.tool_result_tokens += delta
+            self._prev_prompt_tokens = usage.prompt_tokens
+            self._prev_completion_tokens = usage.completion_tokens
+            self._summarize_happened = False
 
             # Update metrics
             self._metrics.turns = turn + 1
@@ -274,6 +292,7 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
+                self._summarize_happened = True
             if flush_repl_state:
                 self._repl.restart_kernel()
 
