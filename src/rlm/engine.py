@@ -157,6 +157,9 @@ class RLMEngine:
             self._last_prompt_tokens = usage.prompt_tokens
 
             # Record per-turn token counts
+            # TODO: verify tool_result token accounting with a self-hosted model + vLLM,
+            # where we can inspect the tokenizer directly (OpenAI encodes tool schemas as
+            # TypeScript internally, making tiktoken-based reconstruction imprecise).
             self._metrics.prompt_tokens_per_turn.append(usage.prompt_tokens)
             self._metrics.completion_tokens_per_turn.append(usage.completion_tokens)
 
