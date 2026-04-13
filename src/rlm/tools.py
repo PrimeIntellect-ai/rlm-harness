@@ -67,7 +67,8 @@ SUMMARIZE_SCHEMA = {
         "description": (
             "Summarize and drop old turns from context to free up space. "
             "A turn is one assistant response plus all its tool results. "
-            "Dropping num_turns removes the oldest complete turns from context."
+            "Dropping num_turns removes the oldest complete turns from context. "
+            "Optionally flush the persistent IPython state after summarization."
         ),
         "parameters": {
             "type": "object",
@@ -79,6 +80,13 @@ SUMMARIZE_SCHEMA = {
                 "summary": {
                     "type": "string",
                     "description": "Your summary of the content being dropped.",
+                },
+                "flush_repl_state": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, restart the persistent IPython kernel after "
+                        "summarization so Python state is reset."
+                    ),
                 },
             },
             "required": ["num_turns", "summary"],
@@ -152,7 +160,7 @@ import rlm
             ):
                 return True
 
-    def _restart_kernel(self):
+    def restart_kernel(self):
         """Restart the kernel and restore the initial REPL state."""
         if self._kc:
             self._kc.stop_channels()
@@ -166,7 +174,7 @@ import rlm
         """Interrupt the running cell and restart the kernel if needed."""
         self._km.interrupt_kernel()
         if not self._wait_for_idle(timeout=2):
-            self._restart_kernel()
+            self.restart_kernel()
 
     def execute(self, code: str, timeout: int | None = None) -> str:
         """Execute code and return combined output."""

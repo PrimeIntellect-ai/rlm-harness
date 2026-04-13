@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import os
 import time
@@ -16,11 +17,19 @@ from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools
 from rlm.types import RLMResult, TokenUsage
 
 
+@dataclass
+class SummarizeResult:
+    content: str
+    num_turns: int = 0
+    flush_repl_state: bool = False
+
+
 class RLMEngine:
     def __init__(
         self,
         model: str | None = None,
         max_turns: int | None = None,
+        max_turns_in_context: int | None = None,
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
@@ -35,13 +44,14 @@ class RLMEngine:
                 "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
             )
         self.max_output = max_output
+        limit = max_turns_in_context
+        if limit is None:
+            limit = int(os.environ.get("RLM_MAX_TURNS_IN_CONTEXT", "-1"))
+        if limit < -1 or limit in (0, 1):
+            raise ValueError("RLM_MAX_TURNS_IN_CONTEXT must be -1 (unlimited) or >= 2")
+        self.max_turns_in_context = None if limit == -1 else limit
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-
-        # Context window awareness
-        self.max_context = int(os.environ.get("RLM_MAX_CONTEXT", "128000"))
-        self._context_warning_sent = False
-        self._last_prompt_tokens = 0
 
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
@@ -99,12 +109,17 @@ class RLMEngine:
 
     async def _run_loop(self, prompt: str) -> RLMResult:
         active_tools = get_active_tools()
+        summarize_enabled = any(
+            tool["function"]["name"] == "summarize" for tool in active_tools
+        )
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
+            max_turns_in_context=self.max_turns_in_context,
+            summarize_enabled=summarize_enabled,
         )
 
         messages = [
@@ -117,16 +132,20 @@ class RLMEngine:
 
         for turn in range(self.max_turns):
             # Call LLM
+            request_kwargs = {
+                "model": self.model,
+                "messages": messages,
+            }
+            if active_tools:
+                request_kwargs["tools"] = active_tools
+                request_kwargs["parallel_tool_calls"] = False
             response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=active_tools if active_tools else None,
+                **request_kwargs,
             )
 
             usage = extract_usage(response)
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
-            self._last_prompt_tokens = usage.prompt_tokens
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
@@ -145,6 +164,13 @@ class RLMEngine:
                 ]
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
+            if msg.tool_calls and len(msg.tool_calls) > 1:
+                final_text = (
+                    "[protocol violation: emitted multiple tool calls in one turn; "
+                    "at most 1 is allowed]"
+                )
+                break
+
             # Token budget check
             if (
                 self.max_tokens
@@ -158,61 +184,44 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute tool calls
-            summarize_num_turns = 0
-
-            async def _exec_one(tc):
-                n = tc.function.name
-                a = json.loads(tc.function.arguments)
-                t0 = time.time()
-                if n == "summarize":
-                    r = self._execute_summarize(a, messages)
-                else:
-                    r = await asyncio.to_thread(self._execute_tool, n, a)
-                return tc, r, time.time() - t0
-
-            tool_results = await asyncio.gather(
-                *[_exec_one(tc) for tc in msg.tool_calls]
-            )
-
-            for tc, result, duration in tool_results:
-                if tc.function.name == "summarize" and not result.startswith("[no-op]"):
-                    summarize_num_turns = json.loads(tc.function.arguments).get(
-                        "num_turns", 0
-                    )
-
-                # Append execution duration
-                if tc.function.name != "summarize":
-                    result += f"\n[executed in {duration:.1f}s]"
-
-                # Append token budget info
-                if self.max_tokens:
-                    result += f"\n[{self._total_usage.completion_tokens}/{self.max_tokens} completion tokens used]"
-
-                # Context window warning (once, at 80%)
-                if (
-                    not self._context_warning_sent
-                    and self._last_prompt_tokens >= self.max_context * 0.80
-                ):
-                    pct = self._last_prompt_tokens / self.max_context
-                    result += (
-                        f"\n\n[CONTEXT LIMIT WARNING] "
-                        f"You have used {self._last_prompt_tokens:,} of "
-                        f"{self.max_context:,} tokens ({pct:.0%}). "
-                        f"Wrap up your task soon."
-                    )
-                    self._context_warning_sent = True
-
-                if self.max_output > 0 and len(result) > self.max_output:
-                    result = result[: self.max_output]
-                self.session.log_tool_result(turn, tc.function.name, result, duration)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    }
+            # Execute the single allowed tool call
+            tc = msg.tool_calls[0]
+            tool_name = tc.function.name
+            tool_args = json.loads(tc.function.arguments)
+            t0 = time.time()
+            summarize_result = None
+            if tool_name == "summarize":
+                summarize_result = self._execute_summarize(tool_args, messages)
+                result = summarize_result.content
+            else:
+                result = await asyncio.to_thread(
+                    self._execute_tool, tool_name, tool_args
                 )
+            duration = time.time() - t0
+
+            summarize_num_turns = 0
+            flush_repl_state = False
+            if summarize_result is not None:
+                summarize_num_turns = summarize_result.num_turns
+                flush_repl_state = summarize_result.flush_repl_state
+
+            if self.max_output > 0 and len(result) > self.max_output:
+                result = result[: self.max_output] + "\n... [output truncated]"
+            if flush_repl_state:
+                result += "\n[repl state flushed]"
+            if tool_name == "ipython" and self.max_turns_in_context is not None:
+                turns_in_context = self._count_turns_in_context(messages)
+                result += (
+                    f"\n[context turns: {turns_in_context}/{self.max_turns_in_context}]"
+                )
+            self.session.log_tool_result(turn, tool_name, result, duration)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                }
+            )
 
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
@@ -220,6 +229,17 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
                 self._drop_turns(messages, summarize_num_turns)
+            if flush_repl_state:
+                self._repl.restart_kernel()
+
+            if self.max_turns_in_context is not None:
+                turns_in_context = self._count_turns_in_context(messages)
+                if turns_in_context > self.max_turns_in_context:
+                    final_text = (
+                        f"[context limit exceeded: {turns_in_context}/"
+                        f"{self.max_turns_in_context} turns in context]"
+                    )
+                    break
         else:
             final_text = msg.content or "[max turns reached]"
 
@@ -249,25 +269,41 @@ class RLMEngine:
             self.session.log_sub_spawn(child_name, "(spawned via rlm())")
         self._known_children = current
 
-    def _execute_summarize(self, args: dict, messages: list[dict]) -> str:
+    def _execute_summarize(self, args: dict, messages: list[dict]) -> SummarizeResult:
         num_turns = args.get("num_turns")
         summary = args.get("summary", "")
+        flush_repl_state = bool(args.get("flush_repl_state", False))
 
         droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
 
         if num_turns is None or num_turns <= 0:
-            return f"[no-op] num_turns is required and must be > 0 (got {num_turns}). No context was dropped."
+            return SummarizeResult(
+                content=(
+                    "[no-op] num_turns is required and must be > 0 "
+                    f"(got {num_turns}). No context was dropped."
+                )
+            )
         if num_turns > droppable:
-            return (
-                f"[no-op] num_turns={num_turns} exceeds droppable turns "
-                f"({droppable}). No context was dropped."
+            return SummarizeResult(
+                content=(
+                    f"[no-op] num_turns={num_turns} exceeds droppable turns "
+                    f"({droppable}). No context was dropped."
+                )
             )
 
         start = self._dropped_turn_count
         end = start + num_turns - 1
         self._summaries.append(f"[turns {start}-{end}] {summary}")
         self._dropped_turn_count += num_turns
-        return "\n\n".join(self._summaries)
+        return SummarizeResult(
+            content="\n\n".join(self._summaries),
+            num_turns=num_turns,
+            flush_repl_state=flush_repl_state,
+        )
+
+    @staticmethod
+    def _count_turns_in_context(messages: list[dict]) -> int:
+        return sum(1 for message in messages if message["role"] == "assistant")
 
     @staticmethod
     def _drop_turns(messages: list[dict], num_turns: int) -> None:

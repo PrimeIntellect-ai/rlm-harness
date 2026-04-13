@@ -5,7 +5,7 @@ A minimal CLI coding agent with a persistent IPython execution environment and o
 The model gets two built-in tools:
 
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
-- `summarize` for dropping old turns from context
+- `summarize` for dropping old turns from context and optionally resetting REPL state
 
 Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents.
 
@@ -48,7 +48,7 @@ All configuration is via environment variables:
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
-| `RLM_MAX_CONTEXT` | `128000` | Context-window warning threshold base |
+| `RLM_MAX_TURNS_IN_CONTEXT` | `-1` | Max assistant turns retained in the live context (`-1` disables; `0` and `1` are invalid) |
 | `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `SERPER_API_KEY` | — | Optional API key for the bundled `skills/websearch` script |
