@@ -165,7 +165,9 @@ class RLMEngine:
 
             # Update metrics
             self._metrics.turns = turn + 1
-            self._metrics.turns_since_last_summarize = (turn + 1) - self._turn_at_last_summarize
+            self._metrics.turns_since_last_summarize = (
+                turn + 1
+            ) - self._turn_at_last_summarize
             self._metrics.prompt_tokens = self._total_usage.prompt_tokens
             self._metrics.completion_tokens = self._total_usage.completion_tokens
 
@@ -187,9 +189,9 @@ class RLMEngine:
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
+                self._metrics.stop_reason = "multiple_tool_calls"
                 final_text = (
-                    "[protocol violation: emitted multiple tool calls in one turn; "
-                    "at most 1 is allowed]"
+                    "[emitted multiple tool calls in one turn; at most 1 is allowed]"
                 )
                 break
 
@@ -260,10 +262,9 @@ class RLMEngine:
             if self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
                 if turns_in_context > self.max_turns_in_context:
-                    final_text = (
-                        f"[context limit exceeded: {turns_in_context}/"
-                        f"{self.max_turns_in_context} turns in context]"
-                    )
+                    self._metrics.stop_reason = "context_limit"
+                    n = f"{turns_in_context}/{self.max_turns_in_context}"
+                    final_text = f"[context limit exceeded: {n} turns in context]"
                     break
         else:
             self._metrics.stop_reason = "max_turns"
