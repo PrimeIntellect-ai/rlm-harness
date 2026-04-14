@@ -105,7 +105,7 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-Bundled helper scripts live under [`skills/`](skills). The system prompt points the model at that directory so it can use those scripts from IPython when needed.
+Bundled helper scripts live under [`skills/`](skills). The system prompt points the model at that directory and lists each installed skill with its import path so it can use those scripts from IPython when needed.
 
 Each skill may also include its own `pyproject.toml`. At build time, `rlm` aggregates
 all `skills/*/pyproject.toml` dependency lists into the root wheel, so skill-specific

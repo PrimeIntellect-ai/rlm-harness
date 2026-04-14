@@ -2,6 +2,24 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+
+def _list_skill_imports(skills_dir: str) -> list[str]:
+    """List import paths for installed skills."""
+    imports: list[str] = []
+    for skill_dir in sorted(Path(skills_dir).iterdir()):
+        if not skill_dir.is_dir():
+            continue
+        skill_name = skill_dir.name
+        module_path = skill_dir / "scripts" / f"{skill_name}.py"
+        if not module_path.is_file():
+            continue
+        imports.append(
+            f"- `{skill_name}`: `from skills.{skill_name}.scripts.{skill_name} import run`"
+        )
+    return imports
+
 
 def build_system_prompt(
     cwd: str,
@@ -13,6 +31,7 @@ def build_system_prompt(
     summarize_enabled: bool,
 ) -> str:
     """Build the system prompt."""
+    skill_imports = _list_skill_imports(skills_dir)
     parts = [
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating.",
         "Call at most one built-in tool per turn.",
@@ -30,6 +49,9 @@ def build_system_prompt(
         "",
         f"Your conversation is logged to {messages_path}.",
     ]
+
+    if skill_imports:
+        parts[14:14] = ["Installed skills:"] + skill_imports + [""]
 
     if max_turns_in_context is not None:
         parts.extend(
