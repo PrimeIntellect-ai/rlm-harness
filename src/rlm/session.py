@@ -91,7 +91,9 @@ class Session:
 
         return sub_prompt, sub_completion, sub_count
 
-    def finalize(self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None):
+    def finalize(
+        self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
+    ):
         entry = {"type": "done", "answer": answer[:1000]}
         if usage:
             entry["usage"] = usage
