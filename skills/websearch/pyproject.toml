@@ -1,0 +1,7 @@
+[project]
+name = "rlm-skill-websearch"
+version = "0.1.0"
+description = "Bundled websearch skill for rlm."
+dependencies = [
+    "httpx",
+]
