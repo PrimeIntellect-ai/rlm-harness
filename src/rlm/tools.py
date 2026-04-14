@@ -1,11 +1,18 @@
-"""Skill loader — discovers and imports tool skills from the skills/ directory."""
+"""Tool definitions and execution."""
 
 from __future__ import annotations
 
-import importlib.util
-import sys
+import copy
+import os
+from queue import Empty
+import re
+import threading
+import time
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rlm.session import Session
 
 
 def _find_skills_dir() -> Path:
@@ -22,85 +29,225 @@ def _find_skills_dir() -> Path:
     raise FileNotFoundError("Could not find skills/ directory")
 
 
-_SKILLS_DIR = _find_skills_dir()
+SKILLS_DIR = _find_skills_dir()
 
+# -- Tool schemas --
 
-def _parse_skill_md(path: Path) -> tuple[dict[str, str], str]:
-    """Read SKILL.md and return (frontmatter dict, body text)."""
-    if not path.exists():
-        return {}, ""
-    text = path.read_text()
-    if text.startswith("---"):
-        _, fm_raw, body = text.split("---", 2)
-        # Simple key: value parser — no YAML dependency needed
-        meta = {}
-        for line in fm_raw.strip().splitlines():
-            if ":" in line:
-                key, _, value = line.partition(":")
-                meta[key.strip()] = value.strip()
-        return meta, body.strip()
-    return {}, text.strip()
-
-
-def _load_skill_module(skill_name: str) -> ModuleType:
-    """Dynamically import a skill's scripts package."""
-    scripts_dir = _SKILLS_DIR / skill_name / "scripts"
-    init_path = scripts_dir / "__init__.py"
-    module_name = f"rlm_skill_{skill_name}"
-
-    # Register the scripts package so relative imports work
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        init_path,
-        submodule_search_locations=[str(scripts_dir)],
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-
-    # Load the tool module (e.g. bash.py) — this is what exposes SCHEMA and run()
-    inner_path = scripts_dir / f"{skill_name}.py"
-    inner_spec = importlib.util.spec_from_file_location(
-        f"{module_name}.{skill_name}",
-        inner_path,
-    )
-    inner_mod = importlib.util.module_from_spec(inner_spec)
-    sys.modules[f"{module_name}.{skill_name}"] = inner_mod
-    inner_spec.loader.exec_module(inner_mod)
-
-    spec.loader.exec_module(mod)
-
-    # Read SKILL.md: frontmatter provides name/description, body provides prompt
-    skill_md = _SKILLS_DIR / skill_name / "SKILL.md"
-    meta, body = _parse_skill_md(skill_md)
-    inner_mod.PROMPT = body
-
-    # Build full OpenAI schema from frontmatter + PARAMETERS from the module
-    inner_mod.SCHEMA = {
-        "type": "function",
-        "function": {
-            "name": meta.get("name", skill_name),
-            "description": meta.get("description", ""),
-            "parameters": inner_mod.PARAMETERS,
+IPYTHON_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "ipython",
+        "description": (
+            "Execute code in a persistent IPython session. "
+            "Variables, imports, and definitions persist across calls. "
+            "Use !command for shell commands (e.g. !git diff, !ls -la). "
+            "Use %%bash for multi-line shell scripts."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Python or IPython code to execute.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": None,  # filled by get_active_tools()
+                },
+            },
+            "required": ["code"],
         },
-    }
+    },
+}
 
-    return inner_mod
+SUMMARIZE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "summarize",
+        "description": (
+            "Summarize and drop old turns from context to free up space. "
+            "A turn is one assistant response plus all its tool results. "
+            "Dropping num_turns removes the oldest complete turns from context. "
+            "Optionally flush the persistent IPython state after summarization."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "num_turns": {
+                    "type": "integer",
+                    "description": "Number of oldest turns to drop from context.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Your summary of the content being dropped.",
+                },
+                "flush_repl_state": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, restart the persistent IPython kernel after "
+                        "summarization so Python state is reset."
+                    ),
+                },
+            },
+            "required": ["num_turns", "summary"],
+        },
+    },
+}
+
+# -- IPython REPL --
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def load_skills(allowed: list[str]) -> dict[str, ModuleType]:
-    """Load and return skill modules for the allowed tool names.
+class IPythonREPL:
+    """Persistent IPython kernel communicating via Jupyter protocol."""
 
-    Returns a dict mapping skill name to its module, which exposes SCHEMA and run().
-    """
-    skills = {}
-    for name in allowed:
-        skill_dir = _SKILLS_DIR / name
-        if not skill_dir.is_dir():
-            continue
-        skills[name] = _load_skill_module(name)
-    return skills
+    def __init__(self, cwd: str, session: "Session | None" = None):
+        self.cwd = cwd
+        self.session = session
+        self._km = None
+        self._kc = None
+        self._lock = threading.Lock()
+
+    def start(self):
+        """Start the IPython kernel."""
+        from jupyter_client import KernelManager
+
+        self._km = KernelManager(kernel_name="python3")
+        self._km.start_kernel(cwd=self.cwd)
+        self._kc = self._km.client()
+        self._kc.start_channels()
+        self._kc.wait_for_ready(timeout=30)
+        self._inject_startup()
+
+    def _inject_startup(self):
+        """Set up kernel: cwd, nest_asyncio, env vars, import rlm SDK."""
+        session_dir = str(self.session.dir) if self.session else None
+        depth = int(os.environ.get("RLM_DEPTH", "0"))
+        setup_code = f"""\
+import os
+os.chdir({self.cwd!r})
+os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
+os.environ['RLM_DEPTH'] = str({depth!r} + 1)
+
+import nest_asyncio
+nest_asyncio.apply()
+
+import asyncio
+import rlm
+"""
+        self._execute_silent(setup_code)
+
+    def _execute_silent(self, code: str):
+        """Execute code without capturing output (for setup)."""
+        self._kc.execute(code, silent=True)
+        self._kc.get_shell_msg(timeout=30)
+
+    def _wait_for_idle(self, timeout: float) -> bool:
+        """Wait briefly for the kernel to report an idle state."""
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            try:
+                msg = self._kc.get_iopub_msg(timeout=remaining)
+            except Empty:
+                return False
+            if (
+                msg["msg_type"] == "status"
+                and msg["content"].get("execution_state") == "idle"
+            ):
+                return True
+
+    def restart_kernel(self):
+        """Restart the kernel and restore the initial REPL state."""
+        if self._kc:
+            self._kc.stop_channels()
+        self._km.restart_kernel(now=True)
+        self._kc = self._km.client()
+        self._kc.start_channels()
+        self._kc.wait_for_ready(timeout=30)
+        self._inject_startup()
+
+    def _interrupt_and_recover(self):
+        """Interrupt the running cell and restart the kernel if needed."""
+        self._km.interrupt_kernel()
+        if not self._wait_for_idle(timeout=2):
+            self.restart_kernel()
+
+    def execute(self, code: str, timeout: int | None = None) -> str:
+        """Execute code and return combined output."""
+        with self._lock:
+            return self._execute_locked(code, timeout)
+
+    def _execute_locked(self, code: str, timeout: int | None) -> str:
+        msg_id = self._kc.execute(code)
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        outputs: list[str] = []
+        try:
+            while True:
+                if deadline is None:
+                    wait_timeout = None
+                else:
+                    wait_timeout = deadline - time.monotonic()
+                    if wait_timeout <= 0:
+                        self._interrupt_and_recover()
+                        outputs.append(
+                            f"\n[execution timed out after {timeout}s and was interrupted]"
+                        )
+                        break
+                try:
+                    msg = self._kc.get_iopub_msg(timeout=wait_timeout)
+                except Empty:
+                    self._interrupt_and_recover()
+                    outputs.append(
+                        f"\n[execution timed out after {timeout}s and was interrupted]"
+                    )
+                    break
+
+                # Only process messages from this execution
+                if msg["parent_header"].get("msg_id") != msg_id:
+                    continue
+
+                msg_type = msg["msg_type"]
+                content = msg["content"]
+
+                if msg_type == "stream":
+                    outputs.append(content["text"])
+                elif msg_type == "execute_result":
+                    text = content.get("data", {}).get("text/plain", "")
+                    if text:
+                        outputs.append(text + "\n")
+                elif msg_type == "error":
+                    tb = "\n".join(content.get("traceback", []))
+                    tb = _ANSI_RE.sub("", tb)
+                    outputs.append(tb)
+                elif msg_type == "status" and content["execution_state"] == "idle":
+                    break
+        finally:
+            # Always drain the shell reply
+            try:
+                self._kc.get_shell_msg(timeout=5)
+            except Exception:
+                pass
+
+        return "".join(outputs)
+
+    def shutdown(self):
+        """Stop the kernel."""
+        if self._kc:
+            self._kc.stop_channels()
+        if self._km:
+            self._km.shutdown_kernel(now=True)
 
 
-def get_active_tools(skills: dict[str, ModuleType]) -> list[dict]:
-    """Return OpenAI tool schemas from loaded skill modules."""
-    return [skills[name].SCHEMA for name in skills]
+def get_active_tools() -> list[dict]:
+    """Return OpenAI tool schemas with runtime defaults baked in."""
+    timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
+    schema = copy.deepcopy(IPYTHON_SCHEMA)
+    schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
+        f"Optional timeout in seconds. Default: {timeout}s."
+    )
+    return [schema, SUMMARIZE_SCHEMA]
