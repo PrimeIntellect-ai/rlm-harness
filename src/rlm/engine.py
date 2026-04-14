@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import os
+from pathlib import Path
 import time
 
 from openai import AsyncOpenAI
@@ -30,6 +31,8 @@ class RLMEngine:
         model: str | None = None,
         max_turns: int | None = None,
         max_turns_in_context: int | None = None,
+        system_prompt_path: str | None = None,
+        append_to_system_prompt: str | None = None,
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
@@ -50,6 +53,12 @@ class RLMEngine:
         if limit < -1 or limit in (0, 1):
             raise ValueError("RLM_MAX_TURNS_IN_CONTEXT must be -1 (unlimited) or >= 2")
         self.max_turns_in_context = None if limit == -1 else limit
+        self.system_prompt_path = system_prompt_path or os.environ.get(
+            "RLM_SYSTEM_PROMPT_PATH"
+        )
+        self.append_to_system_prompt = append_to_system_prompt or os.environ.get(
+            "RLM_APPEND_TO_SYSTEM_PROMPT"
+        )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
@@ -121,14 +130,7 @@ class RLMEngine:
             tool["function"]["name"] == "summarize" for tool in active_tools
         )
         messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = build_system_prompt(
-            self.cwd,
-            str(SKILLS_DIR),
-            messages_path,
-            allow_recursion=self.depth < self.max_depth,
-            max_turns_in_context=self.max_turns_in_context,
-            summarize_enabled=summarize_enabled,
-        )
+        system_prompt = self._load_system_prompt(messages_path, summarize_enabled)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -286,6 +288,21 @@ class RLMEngine:
             metrics=self._metrics,
         )
         return result
+
+    def _load_system_prompt(self, messages_path: str, summarize_enabled: bool) -> str:
+        if self.system_prompt_path:
+            return Path(self.system_prompt_path).read_text()
+        system_prompt = build_system_prompt(
+            self.cwd,
+            str(SKILLS_DIR),
+            messages_path,
+            allow_recursion=self.depth < self.max_depth,
+            max_turns_in_context=self.max_turns_in_context,
+            summarize_enabled=summarize_enabled,
+        )
+        if self.append_to_system_prompt:
+            system_prompt += "\n\n" + self.append_to_system_prompt
+        return system_prompt
 
     def _detect_new_children(self):
         """Scan session dir for new sub-* directories and log them."""
