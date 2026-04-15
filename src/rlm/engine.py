@@ -14,7 +14,7 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools
+from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools, get_installed_skills
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
 
 
@@ -295,6 +295,7 @@ class RLMEngine:
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR) if SKILLS_DIR is not None else None,
+            get_installed_skills(),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             max_turns_in_context=self.max_turns_in_context,

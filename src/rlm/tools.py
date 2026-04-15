@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from importlib import metadata
 import os
 from queue import Empty
 import re
@@ -31,6 +32,17 @@ def _find_skills_dir() -> Path | None:
 
 
 SKILLS_DIR = _find_skills_dir()
+
+
+def get_installed_skills() -> list[str]:
+    """Return installed skill names discovered from distribution metadata."""
+    skills: set[str] = set()
+    prefix = "rlm-skill-"
+    for dist in metadata.distributions():
+        name = dist.metadata.get("Name", "")
+        if name.startswith(prefix):
+            skills.add(name[len(prefix) :])
+    return sorted(skills)
 
 # -- Tool schemas --
 
