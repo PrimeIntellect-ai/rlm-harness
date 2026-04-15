@@ -1,7 +1,9 @@
-"""Websearch tool — Google search via Serper API."""
+"""Websearch skill implementation."""
 
+from __future__ import annotations
+
+import argparse
 import asyncio
-import json
 import os
 
 import httpx
@@ -147,11 +149,15 @@ async def run(
     return output
 
 
-def main():
-    import argparse
-
+def main() -> None:
     parser = argparse.ArgumentParser(prog="websearch")
-    parser.add_argument("queries", nargs="+", help="Google search queries (up to 10).")
+    parser.add_argument(
+        "--queries",
+        nargs="+",
+        required=True,
+        metavar="QUERIES",
+        help="One or more search queries.",
+    )
     parser.add_argument(
         "--max-output",
         type=int,
@@ -176,7 +182,3 @@ def main():
             )
         )
     )
-
-
-if __name__ == "__main__":
-    main()

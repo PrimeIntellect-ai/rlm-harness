@@ -7,13 +7,17 @@ The model gets two built-in tools:
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
 - `summarize` for dropping old turns from context and optionally resetting REPL state
 
-Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents.
+Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Installed skills are also importable directly by name, e.g. `import websearch`.
 
 ## Install
 
+This repo is a `uv` workspace. Put any local skill packages under `skills/`, then run:
+
 ```bash
-uv pip install -e .
+uv sync --all-packages
 ```
+
+Installation is checkout-based: sync from a checked-out `rlm` repo, not from a standalone installer script. `uv sync --all-packages` installs the root `rlm` package plus every workspace skill package in `skills/*` into the shared project environment.
 
 ## CLI
 
@@ -21,17 +25,19 @@ uv pip install -e .
 # Source your API keys
 source .env
 
-uv run rlm "fix the auth bug in login.py"
+uv run --all-packages rlm "fix the auth bug in login.py"
 
 # Override model/limits
-RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run rlm "refactor the parser"
+RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run --all-packages rlm "refactor the parser"
 
 # Append extra instructions to the generated system prompt
-uv run rlm --append-to-system-prompt "Always run tests before finishing." "solve the task"
+uv run --all-packages rlm --append-to-system-prompt "Always run tests before finishing." "solve the task"
 
 # Replace the generated system prompt from a file
-uv run rlm --system-prompt-path /tmp/system.txt "solve the task"
+uv run --all-packages rlm --system-prompt-path /tmp/system.txt "solve the task"
 ```
+
+Run skill CLIs the same way, for example `uv run --all-packages websearch --queries "latest jupyter_client release"`.
 
 ## Python SDK
 
@@ -59,11 +65,11 @@ All configuration is via environment variables:
 | `RLM_APPEND_TO_SYSTEM_PROMPT` | — | Extra instructions appended to the generated system prompt |
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
-| `SERPER_API_KEY` | — | Optional API key for the bundled `skills/websearch` script |
-| `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `skills/websearch` requests |
-| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `skills/websearch` |
+| `SERPER_API_KEY` | — | Optional API key for the bundled `websearch` skill |
+| `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `websearch` requests |
+| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `websearch` |
 
-`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
+`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `uv run --all-packages rlm --model gpt-4o --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
 ## Recursion
 
@@ -105,15 +111,85 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-Bundled helper scripts live under [`skills/`](skills). The system prompt points the model at that directory so it can use those scripts from IPython when needed.
+Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command. After `uv sync --all-packages`, every workspace skill is installed into the shared project environment.
 
-From IPython, import a tool module and `await` its `run(...)` function:
+From IPython, import the skill directly and call its async `run(...)` entrypoint:
 
 ```python
-from skills.websearch.scripts.websearch import run as websearch
+import websearch
 
-await websearch(["latest jupyter_client release"])
+print(websearch.PARAMETERS)
+await websearch.run(queries=["latest jupyter_client release"])
 ```
+
+From the shell, invoke the same skill by command name:
+
+```bash
+uv run --all-packages websearch --queries "latest jupyter_client release"
+```
+
+Skill contract:
+
+- each skill lives under `skills/<name>/`
+- each skill must include `pyproject.toml`, `SKILL.md`, and `src/<name>/__init__.py`
+- each skill must export `PARAMETERS`, async `run(...)`, and a same-name console script
+- `uv sync --all-packages` installs all workspace skills together into the shared environment
+
+### Writing Skills
+
+Author skills as normal Python packages installed into the shared workspace environment.
+
+Recommended layout:
+
+```text
+skills/<name>/
+├── SKILL.md
+├── pyproject.toml
+└── src/
+    └── <name>/
+        ├── __init__.py
+        └── <name>.py
+```
+
+Recommended package pattern:
+
+- `src/<name>/__init__.py` should be a thin re-export layer
+- `src/<name>/<name>.py` should contain the main implementation
+- helper modules can live alongside `<name>.py` as the skill grows
+
+Minimum public surface:
+
+- `PARAMETERS`: JSON-schema-like description of the skill inputs
+- async `run(...)`: programmatic entrypoint
+- `main()`: CLI entrypoint
+
+Naming expectations:
+
+- skill directory name: `<name>`
+- distribution name in `pyproject.toml`: `rlm-skill-<name>`
+- import name: `<name>`
+- console script name: `<name>`
+
+The public names should match across all interfaces:
+
+- `PARAMETERS["properties"]`
+- `run(...)` keyword arguments
+- CLI flags and `--help` output
+
+For example, if the Python API uses `queries=[...]`, then `PARAMETERS` should expose `queries` and the CLI should use `--queries`.
+
+Dependency policy:
+
+- declare skill-specific dependencies in the skill's `pyproject.toml`
+- `uv sync --all-packages` resolves root and skill dependencies into the shared project environment
+- version conflicts between skills are currently the user's responsibility
+
+Workspace expectations:
+
+- every installable skill must live under `skills/<name>/` with its own `pyproject.toml`
+- the root `pyproject.toml` includes `skills/*` as workspace members
+- each skill should expose exactly one console script named `<name>`
+- duplicate import names or console-script names will conflict at install/runtime, so skill authors must avoid them
 
 ## Interactive Mode
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 
 def build_system_prompt(
     cwd: str,
-    skills_dir: str,
+    skills_dir: str | None,
+    installed_skills: list[str],
     messages_path: str,
     *,
     allow_recursion: bool,
@@ -25,11 +26,27 @@ def build_system_prompt(
         "When you are done, stop calling tools and state your final answer.",
         f"Working directory: {cwd}",
         "",
-        f"Programmatic tools are available as Python modules in {skills_dir}.",
-        "Each subdirectory is a tool. Import them in Python and await run(...), or invoke them via their CLI with --help.",
-        "",
         f"Your conversation is logged to {messages_path}.",
     ]
+
+    skill_lines: list[str] = []
+    if skills_dir:
+        skill_lines.append(
+            f"Local skills live under {skills_dir}. Read their SKILL.md files when helpful."
+        )
+    if installed_skills:
+        installed = ", ".join(f"`{skill}`" for skill in installed_skills)
+        skill_lines.append(f"Installed skills: {installed}.")
+        skill_lines.append(
+            "Each skill is available as a Python module by the same name: `import <skill>`. "
+            "Inspect its schema via `<skill>.PARAMETERS`, and call its async entrypoint via `<skill>.run(...)`."
+        )
+        skill_lines.append(
+            "Each skill is also available as a shell command by the same name: `<skill> ...`. "
+            "Discover its CLI usage with `<skill> --help`."
+        )
+    if skill_lines:
+        parts[10:10] = [*skill_lines, ""]
 
     if max_turns_in_context is not None:
         parts.extend(

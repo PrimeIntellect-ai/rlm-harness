@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
-    "httpx",
     "openai>=1.0",
     "ipykernel",
     "jupyter_client",
@@ -23,5 +22,5 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/rlm"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"skills" = "skills"
+[tool.uv.workspace]
+members = ["skills/*"]
