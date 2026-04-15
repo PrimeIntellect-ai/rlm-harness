@@ -11,40 +11,39 @@ Inside the IPython session, the `rlm` module is pre-imported. When recursion is 
 
 ## Install
 
-This repo is a `uv` workspace. Put any local skill packages under `skills/`, then run:
+Clone the repo, put any local skill packages under `skills/`, then run:
 
 ```bash
+git clone https://github.com/PrimeIntellect-ai/rlm.git
+cd rlm
 uv sync --all-packages
+source .venv/bin/activate
 ```
-
-Installation is checkout-based: sync from a checked-out `rlm` repo, not from a standalone installer script. `uv sync --all-packages` installs the root `rlm` package plus every workspace skill package in `skills/*` into the shared project environment.
 
 ## CLI
 
 ```bash
-# Source your API keys
-source .env
-
-uv run --all-packages rlm "fix the auth bug in login.py"
+rlm "fix the auth bug in login.py"
 
 # Override model/limits
-RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run --all-packages rlm "refactor the parser"
+RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 rlm "refactor the parser"
 
 # Append extra instructions to the generated system prompt
-uv run --all-packages rlm --append-to-system-prompt "Always run tests before finishing." "solve the task"
+RLM_APPEND_TO_SYSTEM_PROMPT="Always run tests before finishing." rlm "solve the task"
 
 # Replace the generated system prompt from a file
-uv run --all-packages rlm --system-prompt-path /tmp/system.txt "solve the task"
+RLM_SYSTEM_PROMPT_PATH=/tmp/system.txt rlm "solve the task"
 ```
 
-Run skill CLIs the same way, for example `uv run --all-packages websearch --queries "latest jupyter_client release"`.
+Run skill CLIs the same way, for example `websearch --queries "latest jupyter_client release"`.
 
 ## Python SDK
 
 ```python
+import asyncio
 import rlm
 
-result = await rlm.run("fix the bug")
+result = asyncio.run(rlm.run("fix the bug"))
 ```
 
 ## Configuration
@@ -69,25 +68,32 @@ All configuration is via environment variables:
 | `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `websearch` requests |
 | `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `websearch` |
 
-`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `uv run --all-packages rlm --model gpt-4o --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
+`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `rlm --model gpt-5-mini --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
 ## Recursion
 
 Each agent runs inside a persistent IPython kernel. The `rlm` module is pre-imported there, so recursive calls look like normal Python:
 
 ```python
-await rlm.run("verify the fix")
+import asyncio
+import rlm
+
+result = asyncio.run(rlm.run("verify the fix"))
 ```
 
 For parallel sub-agents, use normal async Python:
 
 ```python
 import asyncio
+import rlm
 
-results = await asyncio.gather(
-    rlm.run("check auth.py"),
-    rlm.run("check login.py"),
-)
+async def main():
+    return await asyncio.gather(
+        rlm.run("check auth.py"),
+        rlm.run("check login.py"),
+    )
+
+results = asyncio.run(main())
 ```
 
 When recursion is disabled by depth, the system prompt does not advertise these APIs and child runs beyond the depth limit fail immediately.
@@ -111,21 +117,22 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command. After `uv sync --all-packages`, every workspace skill is installed into the shared project environment.
+Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command.
 
 From IPython, import the skill directly and call its async `run(...)` entrypoint:
 
 ```python
+import asyncio
 import websearch
 
 print(websearch.PARAMETERS)
-await websearch.run(queries=["latest jupyter_client release"])
+results = asyncio.run(websearch.run(queries=["latest jupyter_client release"]))
 ```
 
 From the shell, invoke the same skill by command name:
 
 ```bash
-uv run --all-packages websearch --queries "latest jupyter_client release"
+websearch --queries "latest jupyter_client release"
 ```
 
 Skill contract:
@@ -133,11 +140,10 @@ Skill contract:
 - each skill lives under `skills/<name>/`
 - each skill must include `pyproject.toml`, `SKILL.md`, and `src/<name>/__init__.py`
 - each skill must export `PARAMETERS`, async `run(...)`, and a same-name console script
-- `uv sync --all-packages` installs all workspace skills together into the shared environment
 
 ### Writing Skills
 
-Author skills as normal Python packages installed into the shared workspace environment.
+Author skills as normal Python packages in this repo.
 
 Recommended layout:
 
@@ -181,13 +187,12 @@ For example, if the Python API uses `queries=[...]`, then `PARAMETERS` should ex
 Dependency policy:
 
 - declare skill-specific dependencies in the skill's `pyproject.toml`
-- `uv sync --all-packages` resolves root and skill dependencies into the shared project environment
 - version conflicts between skills are currently the user's responsibility
 
 Workspace expectations:
 
 - every installable skill must live under `skills/<name>/` with its own `pyproject.toml`
-- the root `pyproject.toml` includes `skills/*` as workspace members
+- the root `pyproject.toml` includes `skills/*` as installable project members
 - each skill should expose exactly one console script named `<name>`
 - duplicate import names or console-script names will conflict at install/runtime, so skill authors must avoid them
 
