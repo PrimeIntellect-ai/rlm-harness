@@ -36,9 +36,7 @@ def build_system_prompt(
         )
     if installed_skills:
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
-        skill_lines.append(
-            f"Installed skills: {installed}."
-        )
+        skill_lines.append(f"Installed skills: {installed}.")
         skill_lines.append(
             "Each skill is available as a Python module by the same name: `import <skill>`. "
             "Inspect its schema via `<skill>.PARAMETERS`, and call its async entrypoint via `<skill>.run(...)`."

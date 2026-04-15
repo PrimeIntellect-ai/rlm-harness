@@ -11,14 +11,13 @@ Inside the IPython session, the `rlm` module is pre-imported. When recursion is 
 
 ## Install
 
-Put any local skill packages under `skills/`, then run:
+This repo is a `uv` workspace. Put any local skill packages under `skills/`, then run:
 
 ```bash
-./install.sh
-source .venv/bin/activate
+uv sync --all-packages
 ```
 
-This rebuilds a repo-local `.venv`, installs `rlm`, then installs every valid skill package found under `skills/*/pyproject.toml`.
+Installation is checkout-based: sync from a checked-out `rlm` repo, not from a standalone installer script. `uv sync --all-packages` installs the root `rlm` package plus every workspace skill package in `skills/*` into the shared project environment.
 
 ## CLI
 
@@ -26,19 +25,19 @@ This rebuilds a repo-local `.venv`, installs `rlm`, then installs every valid sk
 # Source your API keys
 source .env
 
-rlm "fix the auth bug in login.py"
+uv run --all-packages rlm "fix the auth bug in login.py"
 
 # Override model/limits
-RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 rlm "refactor the parser"
+RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 uv run --all-packages rlm "refactor the parser"
 
 # Append extra instructions to the generated system prompt
-rlm --append-to-system-prompt "Always run tests before finishing." "solve the task"
+uv run --all-packages rlm --append-to-system-prompt "Always run tests before finishing." "solve the task"
 
 # Replace the generated system prompt from a file
-rlm --system-prompt-path /tmp/system.txt "solve the task"
+uv run --all-packages rlm --system-prompt-path /tmp/system.txt "solve the task"
 ```
 
-`uv run rlm ...` still works from the repo after installation.
+Run skill CLIs the same way, for example `uv run --all-packages websearch --queries "latest jupyter_client release"`.
 
 ## Python SDK
 
@@ -70,7 +69,7 @@ All configuration is via environment variables:
 | `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `websearch` requests |
 | `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `websearch` |
 
-`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `uv run rlm --model gpt-4o --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
+`RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `uv run --all-packages rlm --model gpt-4o --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
 ## Recursion
 
@@ -112,9 +111,9 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command.
+Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command. After `uv sync --all-packages`, every workspace skill is installed into the shared project environment.
 
-From IPython, import the skill directly and `await` its `run(...)` function:
+From IPython, import the skill directly and call its async `run(...)` entrypoint:
 
 ```python
 import websearch
@@ -126,7 +125,7 @@ await websearch.run(queries=["latest jupyter_client release"])
 From the shell, invoke the same skill by command name:
 
 ```bash
-websearch --queries "latest jupyter_client release"
+uv run --all-packages websearch --queries "latest jupyter_client release"
 ```
 
 Skill contract:
@@ -134,11 +133,11 @@ Skill contract:
 - each skill lives under `skills/<name>/`
 - each skill must include `pyproject.toml`, `SKILL.md`, and `src/<name>/__init__.py`
 - each skill must export `PARAMETERS`, async `run(...)`, and a same-name console script
-- `install.sh` validates duplicate import names and duplicate console-script names before installing
+- `uv sync --all-packages` installs all workspace skills together into the shared environment
 
 ### Writing Skills
 
-Author skills as normal Python packages installed into the shared repo-local `.venv`.
+Author skills as normal Python packages installed into the shared workspace environment.
 
 Recommended layout:
 
@@ -182,15 +181,15 @@ For example, if the Python API uses `queries=[...]`, then `PARAMETERS` should ex
 Dependency policy:
 
 - declare skill-specific dependencies in the skill's `pyproject.toml`
-- `install.sh` installs all skill dependencies into the shared repo `.venv`
+- `uv sync --all-packages` resolves root and skill dependencies into the shared project environment
 - version conflicts between skills are currently the user's responsibility
 
-Installer validation:
+Workspace expectations:
 
-- `install.sh` installs any skill with `skills/<name>/pyproject.toml`
-- it requires `SKILL.md` and `src/<name>/__init__.py`
-- it requires exactly one console script named `<name>`
-- it rejects duplicate import names and duplicate console-script names before installing anything
+- every installable skill must live under `skills/<name>/` with its own `pyproject.toml`
+- the root `pyproject.toml` includes `skills/*` as workspace members
+- each skill should expose exactly one console script named `<name>`
+- duplicate import names or console-script names will conflict at install/runtime, so skill authors must avoid them
 
 ## Interactive Mode
 

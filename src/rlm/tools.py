@@ -44,6 +44,7 @@ def get_installed_skills() -> list[str]:
             skills.add(name[len(prefix) :])
     return sorted(skills)
 
+
 # -- Tool schemas --
 
 IPYTHON_SCHEMA = {
