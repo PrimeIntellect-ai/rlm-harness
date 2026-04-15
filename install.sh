@@ -6,8 +6,8 @@ VENV_DIR="$ROOT_DIR/.venv"
 
 if ! command -v uv >/dev/null 2>&1; then
     if ! command -v curl >/dev/null 2>&1; then
-        echo "curl is required to install uv" >&2
-        exit 1
+        apt-get update -qq
+        apt-get install -y -qq curl
     fi
     curl -LsSf https://astral.sh/uv/install.sh | sh
     export PATH="$HOME/.local/bin:$PATH"
