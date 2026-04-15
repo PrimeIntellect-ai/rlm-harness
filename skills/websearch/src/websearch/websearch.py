@@ -152,11 +152,12 @@ async def run(
 def main() -> None:
     parser = argparse.ArgumentParser(prog="websearch")
     parser.add_argument(
-        "--query",
-        dest="query_flags",
+        "--queries",
+        dest="queries_flags",
         action="append",
         default=[],
-        help="Search query. Repeat the flag to run multiple searches.",
+        metavar="QUERIES",
+        help="Search query. Repeat the flag to pass multiple queries.",
     )
     parser.add_argument(
         "queries",
@@ -177,9 +178,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    queries = [*args.query_flags, *args.queries]
+    queries = [*args.queries_flags, *args.queries]
     if not queries:
-        parser.error("at least one query is required via --query or positional args")
+        parser.error("at least one query is required via --queries or positional args")
 
     print(
         asyncio.run(

@@ -126,7 +126,7 @@ await websearch.run(queries=["latest jupyter_client release"])
 From the shell, invoke the same skill by command name:
 
 ```bash
-websearch --query "latest jupyter_client release"
+websearch --queries "latest jupyter_client release"
 ```
 
 Skill contract:
