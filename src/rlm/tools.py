@@ -6,6 +6,7 @@ import copy
 import os
 from queue import Empty
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -15,8 +16,8 @@ if TYPE_CHECKING:
     from rlm.session import Session
 
 
-def _find_skills_dir() -> Path:
-    """Locate the skills/ directory. Works for both editable and installed layouts."""
+def _find_skills_dir() -> Path | None:
+    """Locate the skills/ directory when available."""
     base = Path(__file__).resolve().parent
     # Editable install: src/rlm/tools.py → ../../skills
     candidate = base.parent.parent / "skills"
@@ -26,7 +27,7 @@ def _find_skills_dir() -> Path:
     candidate = base.parent / "skills"
     if candidate.is_dir():
         return candidate
-    raise FileNotFoundError("Could not find skills/ directory")
+    return None
 
 
 SKILLS_DIR = _find_skills_dir()
@@ -113,7 +114,15 @@ class IPythonREPL:
         """Start the IPython kernel."""
         from jupyter_client import KernelManager
 
-        self._km = KernelManager(kernel_name="python3")
+        self._km = KernelManager(
+            kernel_cmd=[
+                sys.executable,
+                "-m",
+                "ipykernel_launcher",
+                "-f",
+                "{connection_file}",
+            ]
+        )
         self._km.start_kernel(cwd=self.cwd)
         self._kc = self._km.client()
         self._kc.start_channels()
@@ -239,8 +248,10 @@ import rlm
         """Stop the kernel."""
         if self._kc:
             self._kc.stop_channels()
+            self._kc = None
         if self._km:
             self._km.shutdown_kernel(now=True)
+            self._km = None
 
 
 def get_active_tools() -> list[dict]:

@@ -1,7 +1,9 @@
-"""Websearch tool — Google search via Serper API."""
+"""Websearch skill implementation."""
 
+from __future__ import annotations
+
+import argparse
 import asyncio
-import json
 import os
 
 import httpx
@@ -147,11 +149,20 @@ async def run(
     return output
 
 
-def main():
-    import argparse
-
+def main() -> None:
     parser = argparse.ArgumentParser(prog="websearch")
-    parser.add_argument("queries", nargs="+", help="Google search queries (up to 10).")
+    parser.add_argument(
+        "--query",
+        dest="query_flags",
+        action="append",
+        default=[],
+        help="Search query. Repeat the flag to run multiple searches.",
+    )
+    parser.add_argument(
+        "queries",
+        nargs="*",
+        help="Additional search queries (up to 10 total).",
+    )
     parser.add_argument(
         "--max-output",
         type=int,
@@ -166,17 +177,17 @@ def main():
     )
     args = parser.parse_args()
 
+    queries = [*args.query_flags, *args.queries]
+    if not queries:
+        parser.error("at least one query is required via --query or positional args")
+
     print(
         asyncio.run(
             run(
-                args.queries,
+                queries,
                 max_output=args.max_output,
                 timeout=args.timeout,
                 num_results=args.num_results,
             )
         )
     )
-
-
-if __name__ == "__main__":
-    main()

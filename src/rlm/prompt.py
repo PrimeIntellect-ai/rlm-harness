@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def build_system_prompt(
     cwd: str,
-    skills_dir: str,
+    skills_dir: str | None,
     messages_path: str,
     *,
     allow_recursion: bool,
@@ -25,11 +25,22 @@ def build_system_prompt(
         "When you are done, stop calling tools and state your final answer.",
         f"Working directory: {cwd}",
         "",
-        f"Programmatic tools are available as Python modules in {skills_dir}.",
-        "Each subdirectory is a tool. Import them in Python and await run(...), or invoke them via their CLI with --help.",
-        "",
         f"Your conversation is logged to {messages_path}.",
     ]
+
+    if skills_dir:
+        parts[10:10] = [
+            f"Local skills live under {skills_dir}. Read their SKILL.md files when helpful.",
+            "Installed skills are importable directly by name, e.g. `import websearch` then `await websearch.run(...)`.",
+            "If a skill exposes a shell command, invoke it by the same name, e.g. `websearch --help`.",
+            "",
+        ]
+    else:
+        parts[10:10] = [
+            "Installed skills may be importable directly by name, e.g. `import websearch` then `await websearch.run(...)`.",
+            "If a skill exposes a shell command, invoke it by the same name, e.g. `websearch --help`.",
+            "",
+        ]
 
     if max_turns_in_context is not None:
         parts.extend(

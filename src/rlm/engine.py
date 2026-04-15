@@ -294,7 +294,7 @@ class RLMEngine:
             return Path(self.system_prompt_path).read_text()
         system_prompt = build_system_prompt(
             self.cwd,
-            str(SKILLS_DIR),
+            str(SKILLS_DIR) if SKILLS_DIR is not None else None,
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             max_turns_in_context=self.max_turns_in_context,

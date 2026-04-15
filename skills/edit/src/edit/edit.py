@@ -1,6 +1,10 @@
-"""Edit tool — safe single-occurrence string replacement."""
+"""Edit skill implementation."""
 
+from __future__ import annotations
+
+import argparse
 import asyncio
+import os
 from pathlib import Path
 
 PARAMETERS = {
@@ -22,11 +26,12 @@ async def run(
     old_str: str,
     new_str: str,
     *,
-    cwd: str,
+    cwd: str | None = None,
     **_,
 ) -> str:
     """Safe single-occurrence string replacement."""
-    filepath = Path(cwd) / path
+    base_dir = Path(cwd or os.getcwd())
+    filepath = base_dir / path
     if not filepath.exists():
         return f"Error: {path} not found"
     try:
@@ -44,10 +49,7 @@ async def run(
     return f"Edited {path}"
 
 
-def main():
-    import argparse
-    import os
-
+def main() -> None:
     parser = argparse.ArgumentParser(prog="edit")
     parser.add_argument("path", help="File path to edit.")
     parser.add_argument("old_str", help="The exact string to find (must be unique).")
@@ -56,7 +58,3 @@ def main():
     args = parser.parse_args()
 
     print(asyncio.run(run(args.path, args.old_str, args.new_str, cwd=args.cwd)))
-
-
-if __name__ == "__main__":
-    main()
