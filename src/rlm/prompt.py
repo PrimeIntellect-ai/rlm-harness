@@ -20,6 +20,7 @@ def build_system_prompt(
         "",
         "You have a persistent IPython session. Variables, imports, and function definitions persist across calls.",
         "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",
+        "Use !python3 to run code with the project's own packages (e.g. !python3 -m pytest, !python3 -c 'import numpy').",
         "Use %%bash for multi-line shell scripts.",
         "",
         "Work one step at a time: execute code, read the output, then decide your next step.",
