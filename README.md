@@ -136,6 +136,62 @@ Skill contract:
 - each skill must export `PARAMETERS`, async `run(...)`, and a same-name console script
 - `install.sh` validates duplicate import names and duplicate console-script names before installing
 
+### Writing Skills
+
+Author skills as normal Python packages installed into the shared repo-local `.venv`.
+
+Recommended layout:
+
+```text
+skills/<name>/
+├── SKILL.md
+├── pyproject.toml
+└── src/
+    └── <name>/
+        ├── __init__.py
+        └── <name>.py
+```
+
+Recommended package pattern:
+
+- `src/<name>/__init__.py` should be a thin re-export layer
+- `src/<name>/<name>.py` should contain the main implementation
+- helper modules can live alongside `<name>.py` as the skill grows
+
+Minimum public surface:
+
+- `PARAMETERS`: JSON-schema-like description of the skill inputs
+- async `run(...)`: programmatic entrypoint
+- `main()`: CLI entrypoint
+
+Naming expectations:
+
+- skill directory name: `<name>`
+- distribution name in `pyproject.toml`: `rlm-skill-<name>`
+- import name: `<name>`
+- console script name: `<name>`
+
+The public names should match across all interfaces:
+
+- `PARAMETERS["properties"]`
+- `run(...)` keyword arguments
+- CLI flags and `--help` output
+
+For example, if the Python API uses `queries=[...]`, then `PARAMETERS` should expose `queries` and the CLI should use `--queries`.
+
+Dependency policy:
+
+- declare skill-specific dependencies in the skill's `pyproject.toml`
+- `install.sh` installs all skill dependencies into the shared repo `.venv`
+- version conflicts between skills are currently the user's responsibility
+
+Installer validation:
+
+- `install.sh` installs any skill with `skills/<name>/pyproject.toml`
+- it requires `SKILL.md` and `src/<name>/__init__.py`
+- it requires exactly one console script named `<name>`
+- it rejects duplicate import names and duplicate console-script names before installing anything
+
 ## Interactive Mode
 
 Running `rlm` with no prompts enters a placeholder interactive mode. The TUI is not implemented yet.
