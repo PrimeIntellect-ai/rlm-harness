@@ -85,18 +85,29 @@ def _make_proxy(name: str, parameters: dict) -> types.ModuleType:
     return mod
 
 
+def _parse_enabled_tools() -> frozenset[str] | None:
+    """Mirror of rlm.tools._parse_enabled_tools (duplicated to keep this
+    module independent of rlm.__init__, which pulls in openai)."""
+    raw = os.environ.get("RLM_ENABLED_TOOLS", "edit").strip()
+    if raw == "*":
+        return None
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 def install_shims(skills_dir: str) -> list[str]:
     """Register proxy modules for all skills found in *skills_dir*.
 
-    Always installs shims regardless of whether a same-named module is
-    already importable — this guarantees the kernel uses the rlm
-    checkout's version of each skill, not an unrelated package.
+    Respects ``RLM_ENABLED_TOOLS`` so that disabled skills are neither
+    importable nor listed in the system prompt. The CLI itself remains
+    on PATH — we only gate the Python shim and the prompt exposure.
 
     Returns the list of skill names that were shimmed.
     """
     skills_path = Path(skills_dir)
     if not skills_path.is_dir():
         return []
+
+    enabled = _parse_enabled_tools()
 
     shimmed = []
     for skill_dir in sorted(skills_path.iterdir()):
@@ -111,6 +122,9 @@ def install_shims(skills_dir: str) -> list[str]:
                 name = candidate.name
                 break
         else:
+            continue
+
+        if enabled is not None and name not in enabled:
             continue
 
         # Skip if the CLI isn't on PATH

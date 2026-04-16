@@ -39,14 +39,32 @@ def _normalize_skill_name(name: str) -> str:
     return name.replace("-", "_")
 
 
+DEFAULT_ENABLED_TOOLS = "edit"
+
+
+def _parse_enabled_tools() -> frozenset[str] | None:
+    """Parse RLM_ENABLED_TOOLS into an allowlist of skill names.
+
+    Returns None when the env var is ``*`` (allow every discovered skill).
+    Empty string disables every skill. Unset defaults to ``edit``.
+    """
+    raw = os.environ.get("RLM_ENABLED_TOOLS", DEFAULT_ENABLED_TOOLS).strip()
+    if raw == "*":
+        return None
+    return frozenset(name.strip() for name in raw.split(",") if name.strip())
+
+
 def get_installed_skills() -> list[str]:
-    """Return installed skill names discovered from distribution metadata."""
+    """Return installed skill names, filtered by RLM_ENABLED_TOOLS."""
     skills: set[str] = set()
     prefix = "rlm-skill-"
     for dist in metadata.distributions():
         name = dist.metadata.get("Name", "")
         if name.startswith(prefix):
             skills.add(_normalize_skill_name(name[len(prefix) :]))
+    enabled = _parse_enabled_tools()
+    if enabled is not None:
+        skills &= enabled
     return sorted(skills)
 
 
