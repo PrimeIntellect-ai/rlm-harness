@@ -127,15 +127,12 @@ class IPythonREPL:
         """Start the IPython kernel."""
         from jupyter_client import KernelManager
 
-        self._km = KernelManager(
-            kernel_cmd=[
-                sys.executable,
-                "-m",
-                "ipykernel_launcher",
-                "-f",
-                "{connection_file}",
-            ]
-        )
+        kernel_python = os.environ.get("RLM_KERNEL_PYTHON") or sys.executable
+        self._km = KernelManager()
+        # Point the kernel spec at the desired Python interpreter.
+        self._km.kernel_spec.argv = [
+            kernel_python, "-m", "ipykernel_launcher", "-f", "{connection_file}",
+        ]
         self._km.start_kernel(cwd=self.cwd)
         self._kc = self._km.client()
         self._kc.start_channels()
@@ -156,7 +153,10 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import asyncio
-import rlm
+try:
+    import rlm
+except ImportError:
+    pass
 """
         self._execute_silent(setup_code)
 
