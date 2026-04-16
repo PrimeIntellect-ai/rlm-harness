@@ -25,4 +25,4 @@ SKILL_ARGS=""
 for skill_dir in "$RLM_CHECKOUT"/skills/*/; do
     [ -f "$skill_dir/pyproject.toml" ] && SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir"
 done
-eval uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS
+uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS
