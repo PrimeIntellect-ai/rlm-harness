@@ -16,6 +16,12 @@ RLM_CHECKOUT="${RLM_CHECKOUT_PATH:-/tmp/rlm-checkout}"
 rm -rf "$RLM_CHECKOUT"
 git clone --depth 1 "https://${GH_TOKEN:+${GH_TOKEN}@}github.com/PrimeIntellect-ai/rlm.git" "$RLM_CHECKOUT"
 
+# Merge taskset-uploaded skills into the checkout before skill discovery.
+if [ -d /task/rlm-skills ] && find /task/rlm-skills -mindepth 1 -maxdepth 1 | read -r _; then
+    mkdir -p "$RLM_CHECKOUT/skills"
+    cp -R /task/rlm-skills/. "$RLM_CHECKOUT/skills/"
+fi
+
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
 # Discover workspace skill packages and include them with their
 # executables so that skills are both importable and on PATH.
