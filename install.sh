@@ -15,19 +15,21 @@ command -v rg >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq 
 RLM_REPO_URL="${RLM_REPO_URL:-github.com/PrimeIntellect-ai/rlm.git}"
 RLM_REPO_BRANCH="${RLM_REPO_BRANCH:-main}"
 RLM_CHECKOUT="${RLM_CHECKOUT_PATH:-/tmp/rlm-checkout}"
-rm -rf "$RLM_CHECKOUT"
-case "$RLM_REPO_URL" in
-    https://*|http://*)
-        CLONE_URL="$RLM_REPO_URL"
-        ;;
-    github.com/*)
-        CLONE_URL="https://${GH_TOKEN:+${GH_TOKEN}@}${RLM_REPO_URL}"
-        ;;
-    *)
-        CLONE_URL="$RLM_REPO_URL"
-        ;;
-esac
-git clone --depth 1 --branch "$RLM_REPO_BRANCH" "$CLONE_URL" "$RLM_CHECKOUT"
+if [ ! -d "$RLM_CHECKOUT/.git" ]; then
+    case "$RLM_REPO_URL" in
+        https://*|http://*)
+            CLONE_URL="$RLM_REPO_URL"
+            ;;
+        github.com/*)
+            CLONE_URL="https://${GH_TOKEN:+${GH_TOKEN}@}${RLM_REPO_URL}"
+            ;;
+        *)
+            CLONE_URL="$RLM_REPO_URL"
+            ;;
+    esac
+    rm -rf "$RLM_CHECKOUT"
+    git clone --depth 1 --branch "$RLM_REPO_BRANCH" "$CLONE_URL" "$RLM_CHECKOUT"
+fi
 
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
 # Discover workspace skill packages and include them with their
