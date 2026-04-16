@@ -12,21 +12,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 command -v rg >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq ripgrep; }
 
 # Clone the repo
-RLM_REPO_URL="${RLM_REPO_URL:-github.com/PrimeIntellect-ai/rlm.git}"
 RLM_REPO_BRANCH="${RLM_REPO_BRANCH:-main}"
 RLM_CHECKOUT="${RLM_CHECKOUT_PATH:-/tmp/rlm-checkout}"
 rm -rf "$RLM_CHECKOUT"
-case "$RLM_REPO_URL" in
-    https://*|http://*)
-        CLONE_URL="$RLM_REPO_URL"
-        ;;
-    github.com/*)
-        CLONE_URL="https://${GH_TOKEN:+${GH_TOKEN}@}${RLM_REPO_URL}"
-        ;;
-    *)
-        CLONE_URL="$RLM_REPO_URL"
-        ;;
-esac
+CLONE_URL="https://${GH_TOKEN:+${GH_TOKEN}@}github.com/PrimeIntellect-ai/rlm.git"
 git clone --depth 1 --branch "$RLM_REPO_BRANCH" "$CLONE_URL" "$RLM_CHECKOUT"
 
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
