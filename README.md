@@ -196,6 +196,34 @@ Workspace expectations:
 - each skill should expose exactly one console script named `<name>`
 - duplicate import names or console-script names will conflict at install/runtime, so skill authors must avoid them
 
+## Kernel Modes
+
+The IPython kernel can run in two modes depending on the environment.
+
+### Native kernel (default)
+
+The kernel runs inside rlm's own Python. All skills and the `rlm` module are importable natively. This is the default when `RLM_KERNEL_PYTHON` is unset.
+
+Use this for non-Python projects (Go, Java, Rust) or when the sandbox has no `.venv`.
+
+### External kernel (`RLM_KERNEL_PYTHON`)
+
+Set `RLM_KERNEL_PYTHON` to point the kernel at a different Python interpreter — typically the sandbox's `.venv/bin/python3`. The kernel then runs inside the sandbox's Python with access to all its packages (numpy, pandas, etc.) for inline imports. The target Python must have `ipykernel` and `nest_asyncio` installed.
+
+In training, the verifiers harness detects the sandbox `.venv`, installs `ipykernel`, and sets `RLM_KERNEL_PYTHON` automatically. For manual use:
+
+```bash
+export RLM_KERNEL_PYTHON=$(pwd)/.venv/bin/python3
+rlm "fix the failing test"
+```
+
+Lightweight proxy modules are always registered at kernel startup, guaranteeing the kernel uses the rlm checkout's skills rather than any same-named packages in the sandbox. The proxies provide the same API (`import edit`, `edit.PARAMETERS`, `await edit.run(...)`) but delegate to the skill CLIs on PATH via subprocess.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RLM_KERNEL_PYTHON` | `sys.executable` | Python interpreter for the IPython kernel |
+| `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout (used to locate skill source for proxy generation) |
+
 ## Interactive Mode
 
 Running `rlm` with no prompts enters a placeholder interactive mode. The TUI is not implemented yet.
