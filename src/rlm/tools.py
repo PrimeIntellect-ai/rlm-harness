@@ -145,11 +145,16 @@ class IPythonREPL:
         self._inject_startup()
 
     def _inject_startup(self):
-        """Set up kernel: cwd, nest_asyncio, env vars, import rlm SDK."""
+        """Set up kernel: cwd, nest_asyncio, env vars, skill shims."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
+        checkout = os.environ.get("RLM_CHECKOUT_PATH", "/tmp/rlm-checkout")
+        # Path to kernel_shim.py in the rlm source tree
+        shim_path = str(Path(__file__).resolve().parent)
+        skills_dir = str(Path(checkout) / "skills")
+
         setup_code = f"""\
-import os
+import os, sys
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
@@ -158,10 +163,15 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import asyncio
-try:
-    import rlm
-except ImportError:
-    pass
+
+# Install skill shims so `import edit`, `import rlm` etc. work
+# even when the kernel runs in a different Python.  Load kernel_shim
+# directly by path to avoid triggering rlm's __init__ (which needs openai).
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("kernel_shim", {shim_path + "/kernel_shim.py"!r})
+_shim = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_shim)
+_shim.install_shims({skills_dir!r})
 """
         self._execute_silent(setup_code)
 
