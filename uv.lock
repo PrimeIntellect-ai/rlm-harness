@@ -7,13 +7,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[manifest]
-members = [
-    "rlm",
-    "rlm-skill-edit",
-    "rlm-skill-websearch",
-]
-
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -919,22 +912,6 @@ requires-dist = [
     { name = "nest-asyncio" },
     { name = "openai", specifier = ">=1.0" },
 ]
-
-[[package]]
-name = "rlm-skill-edit"
-version = "0.1.0"
-source = { editable = "skills/edit" }
-
-[[package]]
-name = "rlm-skill-websearch"
-version = "0.1.0"
-source = { editable = "skills/websearch" }
-dependencies = [
-    { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "httpx" }]
 
 [[package]]
 name = "six"

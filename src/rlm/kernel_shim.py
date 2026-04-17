@@ -5,12 +5,12 @@ Registers lightweight proxy modules so that ``import edit``,
 kernel — delegating to the skill CLIs on PATH via subprocess.
 
 Shims are always installed regardless of whether a same-named module
-exists, guaranteeing the kernel uses the rlm checkout's skills.
+exists, guaranteeing the kernel uses the uploaded skills.
 
 Usage (called from _inject_startup)::
 
     from rlm.kernel_shim import install_shims
-    install_shims("/tmp/rlm-checkout/skills")
+    install_shims("/task/rlm-skills")
 """
 
 from __future__ import annotations

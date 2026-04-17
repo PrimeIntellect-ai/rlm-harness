@@ -21,6 +21,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rlm"]
-
-[tool.uv.workspace]
-members = ["skills/*"]

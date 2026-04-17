@@ -7,16 +7,14 @@ The model gets two built-in tools:
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
 - `summarize` for dropping old turns from context and optionally resetting REPL state
 
-Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Installed skills are also importable directly by name, e.g. `import websearch`.
+Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
 
 ## Install
-
-Clone the repo, put any local skill packages under `skills/`, then run:
 
 ```bash
 git clone https://github.com/PrimeIntellect-ai/rlm.git
 cd rlm
-uv sync --all-packages
+uv sync
 source .venv/bin/activate
 ```
 
@@ -35,7 +33,7 @@ RLM_APPEND_TO_SYSTEM_PROMPT="Always run tests before finishing." rlm "solve the 
 RLM_SYSTEM_PROMPT_PATH=/tmp/system.txt rlm "solve the task"
 ```
 
-Run skill CLIs the same way, for example `websearch --queries "latest jupyter_client release"`.
+Skill CLIs provided by the host environment are on `$PATH` and invoked the same way (e.g. `websearch --queries "latest jupyter_client release"` when the `websearch` skill is installed).
 
 ## Python SDK
 
@@ -64,9 +62,6 @@ All configuration is via environment variables:
 | `RLM_APPEND_TO_SYSTEM_PROMPT` | — | Extra instructions appended to the generated system prompt |
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
-| `SERPER_API_KEY` | — | Optional API key for the bundled `websearch` skill |
-| `RLM_WEBSEARCH_TIMEOUT` | `45` | Timeout for `websearch` requests |
-| `RLM_WEBSEARCH_NUM_RESULTS` | `5` | Organic results returned by `websearch` |
 
 `RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `rlm --model gpt-5-mini --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
@@ -117,9 +112,9 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-Local skill packages live under [`skills/`](skills). Each skill is a normal Python package with its own `pyproject.toml`, top-level import name, and same-name shell command.
+`rlm` itself ships no skills. Skills are supplied by the host environment: before `install.sh` runs, the environment places skill packages under `/task/rlm-skills/<name>/`, and `install.sh` installs them alongside `rlm` so they're both importable and on `$PATH`.
 
-From IPython, import the skill directly and call its async `run(...)` entrypoint:
+From IPython, import a skill and call its async `run(...)` entrypoint:
 
 ```python
 import asyncio
@@ -135,20 +130,12 @@ From the shell, invoke the same skill by command name:
 websearch --queries "latest jupyter_client release"
 ```
 
-Skill contract:
+### Skill contract
 
-- each skill lives under `skills/<name>/`
-- each skill must include `pyproject.toml`, `SKILL.md`, and `src/<name>/__init__.py`
-- each skill must export `PARAMETERS`, async `run(...)`, and a same-name console script
-
-### Writing Skills
-
-Author skills as normal Python packages in this repo.
-
-Recommended layout:
+A skill is a normal Python package laid out like this:
 
 ```text
-skills/<name>/
+<name>/
 ├── SKILL.md
 ├── pyproject.toml
 └── src/
@@ -157,44 +144,26 @@ skills/<name>/
         └── <name>.py
 ```
 
-Recommended package pattern:
+Required public surface:
 
-- `src/<name>/__init__.py` should be a thin re-export layer
-- `src/<name>/<name>.py` should contain the main implementation
-- helper modules can live alongside `<name>.py` as the skill grows
-
-Minimum public surface:
-
-- `PARAMETERS`: JSON-schema-like description of the skill inputs
+- `PARAMETERS`: JSON-schema-like description of the inputs
 - async `run(...)`: programmatic entrypoint
 - `main()`: CLI entrypoint
 
-Naming expectations:
+Naming expectations (all match):
 
 - skill directory name: `<name>`
 - distribution name in `pyproject.toml`: `rlm-skill-<name>`
 - import name: `<name>`
 - console script name: `<name>`
 
-The public names should match across all interfaces:
+Keyword arguments on `run(...)`, keys under `PARAMETERS["properties"]`, and CLI flags should all line up. For example, if the Python API uses `queries=[...]`, `PARAMETERS` should expose `queries` and the CLI should use `--queries`.
 
-- `PARAMETERS["properties"]`
-- `run(...)` keyword arguments
-- CLI flags and `--help` output
+Dependencies go in the skill's own `pyproject.toml`. Version conflicts between skills installed side-by-side are the user's responsibility.
 
-For example, if the Python API uses `queries=[...]`, then `PARAMETERS` should expose `queries` and the CLI should use `--queries`.
+### Local development
 
-Dependency policy:
-
-- declare skill-specific dependencies in the skill's `pyproject.toml`
-- version conflicts between skills are currently the user's responsibility
-
-Workspace expectations:
-
-- every installable skill must live under `skills/<name>/` with its own `pyproject.toml`
-- the root `pyproject.toml` includes `skills/*` as installable project members
-- each skill should expose exactly one console script named `<name>`
-- duplicate import names or console-script names will conflict at install/runtime, so skill authors must avoid them
+For running `rlm` against a specific skill set outside of a sandbox-orchestrated environment, create a `/task/rlm-skills/` directory (or bind-mount one) and place skill packages there before running `install.sh`. The rlm repo ships no skills by default; look at the `rlm-swe` or `rlm-deepdive` environments for working skill packages to copy.
 
 ## Kernel Modes
 
@@ -217,12 +186,12 @@ export RLM_KERNEL_PYTHON=$(pwd)/.venv/bin/python3
 rlm "fix the failing test"
 ```
 
-Lightweight proxy modules are always registered at kernel startup, guaranteeing the kernel uses the rlm checkout's skills rather than any same-named packages in the sandbox. The proxies provide the same API (`import edit`, `edit.PARAMETERS`, `await edit.run(...)`) but delegate to the skill CLIs on PATH via subprocess.
+Lightweight proxy modules are always registered at kernel startup, guaranteeing the kernel uses the uploaded skills at `/task/rlm-skills` rather than any same-named packages in the sandbox. The proxies provide the same API (`import edit`, `edit.PARAMETERS`, `await edit.run(...)`) but delegate to the skill CLIs on PATH via subprocess.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RLM_KERNEL_PYTHON` | `sys.executable` | Python interpreter for the IPython kernel |
-| `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout (used to locate skill source for proxy generation) |
+| `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout |
 
 ## Interactive Mode
 
