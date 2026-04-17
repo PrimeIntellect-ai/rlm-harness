@@ -32,12 +32,15 @@ if [ ! -d "$RLM_CHECKOUT/.git" ]; then
 fi
 
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
-# Discover workspace skill packages and include them with their
-# executables so that skills are both importable and on PATH.
+# Skills are owned by the environment (e.g. ComposableEnv uploads them to
+# /task/rlm-skills before this script runs).  Discover and install any
+# that are present so they're both importable and on PATH.
 SKILL_ARGS=""
-for skill_dir in "$RLM_CHECKOUT"/skills/*/; do
-    [ -f "$skill_dir/pyproject.toml" ] || continue
-    skill_name=$(grep '^name' "$skill_dir/pyproject.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
-done
+if [ -d /task/rlm-skills ]; then
+    for skill_dir in /task/rlm-skills/*/; do
+        [ -f "$skill_dir/pyproject.toml" ] || continue
+        skill_name=$(grep '^name' "$skill_dir/pyproject.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+        SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
+    done
+fi
 uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS

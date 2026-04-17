@@ -17,18 +17,17 @@ if TYPE_CHECKING:
     from rlm.session import Session
 
 
+TASK_SKILLS_DIR = Path("/task/rlm-skills")
+
+
 def _find_skills_dir() -> Path | None:
-    """Locate the skills/ directory when available."""
-    base = Path(__file__).resolve().parent
-    # Editable install: src/rlm/tools.py → ../../skills
-    candidate = base.parent.parent / "skills"
-    if candidate.is_dir():
-        return candidate
-    # Installed wheel: site-packages/rlm/tools.py → ../skills
-    candidate = base.parent / "skills"
-    if candidate.is_dir():
-        return candidate
-    return None
+    """Locate the skills/ directory when available.
+
+    Skills are uploaded by the environment (e.g. ``ComposableEnv``) to
+    ``/task/rlm-skills`` before ``install.sh`` runs.  This is the only
+    location the agent looks at; rlm itself no longer bundles skills.
+    """
+    return TASK_SKILLS_DIR if TASK_SKILLS_DIR.is_dir() else None
 
 
 SKILLS_DIR = _find_skills_dir()
@@ -136,7 +135,11 @@ class IPythonREPL:
         self._km = KernelManager()
         # Point the kernel spec at the desired Python interpreter.
         self._km.kernel_spec.argv = [
-            kernel_python, "-m", "ipykernel_launcher", "-f", "{connection_file}",
+            kernel_python,
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
         ]
         self._km.start_kernel(cwd=self.cwd)
         self._kc = self._km.client()
@@ -148,10 +151,9 @@ class IPythonREPL:
         """Set up kernel: cwd, nest_asyncio, env vars, skill shims."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
-        checkout = os.environ.get("RLM_CHECKOUT_PATH", "/tmp/rlm-checkout")
         # Path to kernel_shim.py in the rlm source tree
         shim_path = str(Path(__file__).resolve().parent)
-        skills_dir = str(Path(checkout) / "skills")
+        skills_dir = str(TASK_SKILLS_DIR)
 
         setup_code = f"""\
 import os, sys
