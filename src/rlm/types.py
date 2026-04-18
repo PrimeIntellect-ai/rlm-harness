@@ -28,12 +28,20 @@ class RLMMetrics:
     summarize_rejected_count: int = 0
     summarize_total_turns_dropped: int = 0
     summarize_summary_lengths: list[int] = field(default_factory=list)
+    summarize_chars_dropped: list[int] = field(default_factory=list)
 
     # Token metrics before/dropped per summarize
     summarize_prompt_tokens_before: list[int] = field(default_factory=list)
     summarize_completion_tokens_before: list[int] = field(default_factory=list)
     summarize_prompt_tokens_dropped: list[int] = field(default_factory=list)
     summarize_completion_tokens_dropped: list[int] = field(default_factory=list)
+
+    # Built-in tool call counts
+    ipython_call_count: int = 0
+
+    # Per-call ipython input stats (means/percentiles computed at report time)
+    ipython_code_lengths: list[int] = field(default_factory=list)
+    ipython_code_lines: list[int] = field(default_factory=list)
 
     # This agent's token usage
     prompt_tokens: int = 0

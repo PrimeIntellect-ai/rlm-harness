@@ -216,6 +216,13 @@ class RLMEngine:
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments)
+            if tool_name == "ipython":
+                code = tool_args.get("code") or ""
+                self._metrics.ipython_call_count += 1
+                self._metrics.ipython_code_lengths.append(len(code))
+                self._metrics.ipython_code_lines.append(
+                    code.count("\n") + 1 if code else 0
+                )
             t0 = time.time()
             summarize_result = None
             if tool_name == "summarize":
@@ -257,7 +264,8 @@ class RLMEngine:
 
             # Drop old turn-groups after summarize
             if summarize_num_turns > 0:
-                self._drop_turns(messages, summarize_num_turns)
+                chars_dropped = self._drop_turns(messages, summarize_num_turns)
+                self._metrics.summarize_chars_dropped.append(chars_dropped)
             if flush_repl_state:
                 self._repl.restart_kernel()
 
@@ -382,7 +390,8 @@ class RLMEngine:
         return sum(1 for message in messages if message["role"] == "assistant")
 
     @staticmethod
-    def _drop_turns(messages: list[dict], num_turns: int) -> None:
+    def _drop_turns(messages: list[dict], num_turns: int) -> int:
+        """Drop num_turns oldest assistant+tool turn-groups. Return chars dropped."""
         start = 0
         while start < len(messages) and messages[start]["role"] != "assistant":
             start += 1
@@ -394,7 +403,14 @@ class RLMEngine:
             end += 1
             while end < len(messages) and messages[end]["role"] == "tool":
                 end += 1
+
+        chars = 0
+        for m in messages[start:end]:
+            chars += len(m.get("content") or "")
+            for tc in m.get("tool_calls") or []:
+                chars += len((tc.get("function") or {}).get("arguments") or "")
         del messages[start:end]
+        return chars
 
     def _execute_tool(self, name: str, args: dict) -> str:
         if name == "ipython":
