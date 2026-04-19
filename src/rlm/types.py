@@ -45,24 +45,28 @@ class RLMMetrics:
 
     # Turn metrics
     turns_since_last_summarize: int = 0
-    turns_between_summarizes: list[int] = field(default_factory=list)
+    turns_between_summarizes_mean: float = 0.0
 
     # Summarize metrics
     summarize_rejected_count: int = 0
-    summarize_turns_dropped_total: int = 0
-    summarize_summary_lengths: list[int] = field(default_factory=list)
-    summarize_chars_dropped_total: int = 0
-    summarize_summary_chars_total: int = 0
+    summarize_turns_dropped_mean: float = 0.0
+    summarize_chars_dropped_mean: float = 0.0
+    summarize_summary_chars_mean: float = 0.0
 
     # IPython input size metrics
-    ipython_input_chars_total: int = 0
     ipython_input_chars_mean: float = 0.0
-    ipython_input_loc_total: int = 0
     ipython_input_loc_mean: float = 0.0
 
     # Internal counters for derived metrics
     _turns: int = field(default=0, repr=False)
     _ipython_call_count: int = field(default=0, repr=False)
+    _ipython_input_chars_total: int = field(default=0, repr=False)
+    _ipython_input_loc_total: int = field(default=0, repr=False)
+    _summarize_applied_count: int = field(default=0, repr=False)
+    _turns_between_summarizes_total: int = field(default=0, repr=False)
+    _summarize_turns_dropped_total: int = field(default=0, repr=False)
+    _summarize_chars_dropped_total: int = field(default=0, repr=False)
+    _summarize_summary_chars_total: int = field(default=0, repr=False)
 
     # This agent's token usage
     prompt_tokens: int = 0
@@ -91,32 +95,42 @@ class RLMMetrics:
     def record(self, event: BuiltinMetricEvent) -> None:
         if isinstance(event, IpythonExecuted):
             self._ipython_call_count += 1
-            self.ipython_input_chars_total += event.input_chars
-            self.ipython_input_loc_total += event.input_loc
+            self._ipython_input_chars_total += event.input_chars
+            self._ipython_input_loc_total += event.input_loc
         elif isinstance(event, SummarizeRejected):
             self.summarize_rejected_count += 1
         elif isinstance(event, SummarizeApplied):
-            self.turns_between_summarizes.append(event.turns_since_last_summarize)
-            self.summarize_turns_dropped_total += event.num_turns
-            self.summarize_summary_lengths.append(event.summary_chars)
-            self.summarize_chars_dropped_total += event.dropped_chars
-            self.summarize_summary_chars_total += event.summary_chars
+            self._summarize_applied_count += 1
+            self._turns_between_summarizes_total += event.turns_since_last_summarize
+            self._summarize_turns_dropped_total += event.num_turns
+            self._summarize_chars_dropped_total += event.dropped_chars
+            self._summarize_summary_chars_total += event.summary_chars
         else:
             raise TypeError(f"Unsupported builtin metric event: {type(event)!r}")
 
         self._refresh_derived_metrics()
 
     def _refresh_derived_metrics(self) -> None:
-        self.ipython_input_chars_mean = (
-            self.ipython_input_chars_total / self._ipython_call_count
-            if self._ipython_call_count
-            else 0.0
-        )
-        self.ipython_input_loc_mean = (
-            self.ipython_input_loc_total / self._ipython_call_count
-            if self._ipython_call_count
-            else 0.0
-        )
+        if self._ipython_call_count:
+            self.ipython_input_chars_mean = (
+                self._ipython_input_chars_total / self._ipython_call_count
+            )
+            self.ipython_input_loc_mean = (
+                self._ipython_input_loc_total / self._ipython_call_count
+            )
+        if self._summarize_applied_count:
+            self.turns_between_summarizes_mean = (
+                self._turns_between_summarizes_total / self._summarize_applied_count
+            )
+            self.summarize_turns_dropped_mean = (
+                self._summarize_turns_dropped_total / self._summarize_applied_count
+            )
+            self.summarize_chars_dropped_mean = (
+                self._summarize_chars_dropped_total / self._summarize_applied_count
+            )
+            self.summarize_summary_chars_mean = (
+                self._summarize_summary_chars_total / self._summarize_applied_count
+            )
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
