@@ -44,7 +44,6 @@ class RLMMetrics:
     """Metrics tracked during an rlm session."""
 
     # Turn metrics
-    turns: int = 0
     turns_since_last_summarize: int = 0
     turns_between_summarizes: list[int] = field(default_factory=list)
 
@@ -62,6 +61,7 @@ class RLMMetrics:
     ipython_input_loc_mean: float = 0.0
 
     # Internal counters for derived metrics
+    _turns: int = field(default=0, repr=False)
     _ipython_call_count: int = field(default=0, repr=False)
 
     # This agent's token usage
@@ -79,6 +79,14 @@ class RLMMetrics:
     sub_rlm_count: int = 0
 
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
+
+    @property
+    def turns(self) -> int:
+        return self._turns
+
+    @turns.setter
+    def turns(self, value: int) -> None:
+        self._turns = value
 
     def record(self, event: BuiltinMetricEvent) -> None:
         if isinstance(event, IpythonExecuted):
