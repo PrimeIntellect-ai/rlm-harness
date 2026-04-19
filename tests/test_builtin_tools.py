@@ -2,7 +2,7 @@ import unittest
 
 from rlm.tools import SummarizeState, get_active_tools
 from rlm.tools.base import ToolContext
-from rlm.tools.ipython import IpythonTool
+from rlm.tools.ipython import IPYTHON_TIMEOUT_MAX_SECONDS, IpythonTool
 from rlm.tools.summarize import SummarizeTool
 from rlm.types import RLMMetrics, TokenUsage
 
@@ -16,13 +16,13 @@ class DummyRepl:
         return f"ran:{code}:{timeout}"
 
 
-def make_context(messages=None):
+def make_context(messages=None, exec_timeout=17):
     return ToolContext(
         messages=messages or [],
         metrics=RLMMetrics(turns=4, turns_since_last_summarize=3),
         total_usage=TokenUsage(prompt_tokens=0, completion_tokens=12),
         last_prompt_tokens=20,
-        exec_timeout=17,
+        exec_timeout=exec_timeout,
         repl=DummyRepl(),
         state={"summarize": SummarizeState()},
     )
@@ -41,6 +41,36 @@ class BuiltinToolTests(unittest.TestCase):
 
         self.assertEqual(outcome.content, "ran:123:17")
         self.assertEqual(context.repl.calls, [("123", 17)])
+
+    def test_ipython_tool_caps_requested_timeout_at_ten_minutes(self):
+        tool = IpythonTool()
+        context = make_context()
+
+        outcome = tool.execute({"code": "print(1)", "timeout": 9999}, context)
+
+        self.assertEqual(
+            outcome.content,
+            f"ran:print(1):{IPYTHON_TIMEOUT_MAX_SECONDS}",
+        )
+        self.assertEqual(
+            context.repl.calls,
+            [("print(1)", IPYTHON_TIMEOUT_MAX_SECONDS)],
+        )
+
+    def test_ipython_tool_caps_default_timeout_at_ten_minutes(self):
+        tool = IpythonTool()
+        context = make_context(exec_timeout=9999)
+
+        outcome = tool.execute({"code": "print(1)"}, context)
+
+        self.assertEqual(
+            outcome.content,
+            f"ran:print(1):{IPYTHON_TIMEOUT_MAX_SECONDS}",
+        )
+        self.assertEqual(
+            context.repl.calls,
+            [("print(1)", IPYTHON_TIMEOUT_MAX_SECONDS)],
+        )
 
     def test_summarize_tool_updates_state_and_returns_string_content(self):
         tool = SummarizeTool()

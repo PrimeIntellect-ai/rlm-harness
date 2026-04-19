@@ -47,6 +47,7 @@ IPYTHON_SCHEMA = {
 }
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+IPYTHON_TIMEOUT_MAX_SECONDS = 600
 
 
 class IpythonTool:
@@ -55,10 +56,14 @@ class IpythonTool:
     name = "ipython"
 
     def schema(self) -> dict[str, Any]:
-        timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
+        timeout = min(
+            int(os.environ.get("RLM_EXEC_TIMEOUT", "300")),
+            IPYTHON_TIMEOUT_MAX_SECONDS,
+        )
         schema = copy.deepcopy(IPYTHON_SCHEMA)
         schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
-            f"Optional timeout in seconds. Default: {timeout}s."
+            "Optional timeout in seconds. "
+            f"Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
         )
         return schema
 
@@ -75,6 +80,7 @@ class IpythonTool:
                 timeout = int(timeout)
             except (TypeError, ValueError):
                 timeout = context.exec_timeout
+        timeout = min(timeout, IPYTHON_TIMEOUT_MAX_SECONDS)
 
         if context.repl is None:
             return ToolOutcome(content="Error: IPython REPL is not available")
