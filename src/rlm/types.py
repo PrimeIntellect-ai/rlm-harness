@@ -144,10 +144,7 @@ class RLMMetrics:
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
-        data = asdict(self)
-        data["ipython_input_chars_mean"] = self.ipython_input_chars_mean
-        data["ipython_input_loc_mean"] = self.ipython_input_loc_mean
-        return data
+        return asdict(self)
 
 
 @dataclass
