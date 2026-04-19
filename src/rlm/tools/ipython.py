@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.skills import TASK_SKILLS_DIR
+from rlm.types import BuiltinToolCalled, IpythonExecuted
 
 if TYPE_CHECKING:
     from rlm.session import Session
@@ -71,6 +72,12 @@ class IpythonTool:
         code = args.get("code", "")
         if not isinstance(code, str):
             code = str(code)
+        input_chars = len(code)
+        input_loc = self._count_nonempty_lines(code)
+        metric_events = [
+            BuiltinToolCalled(self.name),
+            IpythonExecuted(input_chars=input_chars, input_loc=input_loc),
+        ]
 
         timeout = args.get("timeout")
         if timeout is None:
@@ -83,9 +90,19 @@ class IpythonTool:
         timeout = min(timeout, IPYTHON_TIMEOUT_MAX_SECONDS)
 
         if context.repl is None:
-            return ToolOutcome(content="Error: IPython REPL is not available")
+            return ToolOutcome(
+                content="Error: IPython REPL is not available",
+                metric_events=metric_events,
+            )
 
-        return ToolOutcome(content=context.repl.execute(code, timeout=timeout))
+        return ToolOutcome(
+            content=context.repl.execute(code, timeout=timeout),
+            metric_events=metric_events,
+        )
+
+    @staticmethod
+    def _count_nonempty_lines(code: str) -> int:
+        return sum(1 for line in code.splitlines() if line.strip())
 
 
 class IPythonREPL:

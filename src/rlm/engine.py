@@ -223,6 +223,8 @@ class RLMEngine:
                     tool.execute, tool_args, self._tool_context(messages)
                 )
             duration = time.time() - t0
+            for event in tool_result.metric_events:
+                self._metrics.record(event)
 
             result = tool_result.content
 
