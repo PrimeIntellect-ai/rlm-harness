@@ -62,7 +62,6 @@ class RLMMetrics:
     # Summarize metrics
     summarize_count: int = 0
     summarize_rejected_count: int = 0
-    summarize_calls: int = 0
     summarize_total_turns_dropped: int = 0
     summarize_summary_lengths: list[int] = field(default_factory=list)
     summarize_chars_dropped_total: int = 0
@@ -106,15 +105,13 @@ class RLMMetrics:
             self.builtin_tool_calls_total += 1
             if event.name == "ipython":
                 self.ipython_calls += 1
-            elif event.name == "summarize":
-                self.summarize_calls += 1
-                self.summarize_count += 1
         elif isinstance(event, IpythonExecuted):
             self.ipython_input_chars_total += event.input_chars
             self.ipython_input_loc_total += event.input_loc
         elif isinstance(event, SummarizeRejected):
             self.summarize_rejected_count += 1
         elif isinstance(event, SummarizeApplied):
+            self.summarize_count += 1
             self.turns_between_summarizes.append(event.turns_since_last_summarize)
             self.summarize_total_turns_dropped += event.num_turns
             self.summarize_summary_lengths.append(event.summary_chars)
