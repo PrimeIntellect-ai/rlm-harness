@@ -4,9 +4,16 @@ set -eo pipefail
 # Ensure curl is available (Multi-SWE-RL images may lack it)
 command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
 
-# Always install latest uv (sandbox images may have stale versions)
+# Always install latest uv (sandbox images may have stale versions). Pin
+# UV_INSTALL_DIR so the PATH export below agrees with where the installer
+# actually writes — on images that set XDG_DATA_HOME independent of HOME
+# (e.g. SWE-rebench-V2 python images with HOME=/root, XDG_DATA_HOME=
+# /workspace/.local/share), the astral installer resolves its target via
+# $XDG_DATA_HOME/../bin and lands uv there, while a $HOME-based PATH
+# export points at an empty dir and leaves uv off PATH.
+export UV_INSTALL_DIR="${UV_INSTALL_DIR:-$HOME/.local/bin}"
 curl -LsSf https://astral.sh/uv/install.sh | sh
-[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env" || export PATH="$HOME/.local/bin:$PATH"
+export PATH="$UV_INSTALL_DIR:$PATH"
 
 # Install ripgrep if missing
 command -v rg >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq ripgrep; }
