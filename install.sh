@@ -5,13 +5,15 @@ set -eo pipefail
 command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
 
 # Always install latest uv (sandbox images may have stale versions). Pin
-# UV_INSTALL_DIR so the PATH export below agrees with where the installer
-# actually writes — on images that set XDG_DATA_HOME independent of HOME
-# (e.g. SWE-rebench-V2 python images with HOME=/root, XDG_DATA_HOME=
-# /workspace/.local/share), the astral installer resolves its target via
-# $XDG_DATA_HOME/../bin and lands uv there, while a $HOME-based PATH
-# export points at an empty dir and leaves uv off PATH.
+# UV_INSTALL_DIR (uv installer target) and UV_TOOL_BIN_DIR (`uv tool install`
+# shim target) to the same directory, and make the PATH export agree — on
+# images that set XDG_DATA_HOME independent of HOME (e.g. SWE-rebench-V2
+# python images with HOME=/root, XDG_DATA_HOME=/workspace/.local/share),
+# both uv and its tool shims otherwise resolve via $XDG_DATA_HOME/../bin
+# while a $HOME-based PATH export points at an empty dir — leaving `uv`
+# and any `uv tool install`-ed executables (e.g. `rlm`) off PATH.
 export UV_INSTALL_DIR="${UV_INSTALL_DIR:-$HOME/.local/bin}"
+export UV_TOOL_BIN_DIR="${UV_TOOL_BIN_DIR:-$UV_INSTALL_DIR}"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$UV_INSTALL_DIR:$PATH"
 
