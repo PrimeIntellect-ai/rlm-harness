@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -14,15 +13,16 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.tools import SKILLS_DIR, IPythonREPL, get_active_tools, get_installed_skills
+from rlm.tools import (
+    SKILLS_DIR,
+    IPythonREPL,
+    SummarizeState,
+    ToolContext,
+    get_active_tools,
+    get_builtin_tool,
+    get_installed_skills,
+)
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
-
-
-@dataclass
-class SummarizeResult:
-    content: str
-    num_turns: int = 0
-    flush_repl_state: bool = False
 
 
 class RLMEngine:
@@ -76,11 +76,8 @@ class RLMEngine:
             max_turns=self.max_turns,
             max_tokens=self.max_tokens or 0,
         )
-        self._turn_at_last_summarize: int = 0
 
-        # Summarize tool state
-        self._summaries: list[str] = []
-        self._dropped_turn_count: int = 0
+        self._tool_state = {"summarize": SummarizeState()}
 
         # IPython REPL (started lazily in single-agent execution)
         self._repl: IPythonREPL | None = None
@@ -167,9 +164,10 @@ class RLMEngine:
 
             # Update metrics
             self._metrics.turns = turn + 1
+            summarize_state = self._tool_state["summarize"]
             self._metrics.turns_since_last_summarize = (
                 turn + 1
-            ) - self._turn_at_last_summarize
+            ) - summarize_state.turn_at_last_summarize
             self._metrics.prompt_tokens = self._total_usage.prompt_tokens
             self._metrics.completion_tokens = self._total_usage.completion_tokens
 
@@ -217,25 +215,20 @@ class RLMEngine:
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments)
             t0 = time.time()
-            summarize_result = None
-            if tool_name == "summarize":
-                summarize_result = self._execute_summarize(tool_args, messages)
-                result = summarize_result.content
+            tool = get_builtin_tool(tool_name)
+            if tool is None:
+                tool_result = self._unknown_tool_result(tool_name)
             else:
-                result = await asyncio.to_thread(
-                    self._execute_tool, tool_name, tool_args
+                tool_result = await asyncio.to_thread(
+                    tool.execute, tool_args, self._tool_context(messages)
                 )
             duration = time.time() - t0
 
-            summarize_num_turns = 0
-            flush_repl_state = False
-            if summarize_result is not None:
-                summarize_num_turns = summarize_result.num_turns
-                flush_repl_state = summarize_result.flush_repl_state
+            result = tool_result.content
 
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
-            if flush_repl_state:
+            if tool_result.flush_repl_state:
                 result += "\n[repl state flushed]"
             if tool_name == "ipython" and self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
@@ -256,9 +249,9 @@ class RLMEngine:
             self._detect_new_children()
 
             # Drop old turn-groups after summarize
-            if summarize_num_turns > 0:
-                self._drop_turns(messages, summarize_num_turns)
-            if flush_repl_state:
+            if tool_result.drop_turns > 0:
+                self._drop_turns(messages, tool_result.drop_turns)
+            if tool_result.flush_repl_state:
                 self._repl.restart_kernel()
 
             if self.max_turns_in_context is not None:
@@ -315,66 +308,15 @@ class RLMEngine:
             self.session.log_sub_spawn(child_name, "(spawned via rlm())")
         self._known_children = current
 
-    def _execute_summarize(self, args: dict, messages: list[dict]) -> SummarizeResult:
-        num_turns = args.get("num_turns")
-        summary = args.get("summary", "")
-        flush_repl_state = bool(args.get("flush_repl_state", False))
-
-        droppable = sum(1 for m in messages if m["role"] == "assistant") - 1
-
-        if num_turns is None or num_turns <= 0:
-            self._metrics.summarize_rejected_count += 1
-            return SummarizeResult(
-                content=(
-                    "[no-op] num_turns is required and must be > 0 "
-                    f"(got {num_turns}). No context was dropped."
-                )
-            )
-        if num_turns > droppable:
-            self._metrics.summarize_rejected_count += 1
-            return SummarizeResult(
-                content=(
-                    f"[no-op] num_turns={num_turns} exceeds droppable turns "
-                    f"({droppable}). No context was dropped."
-                )
-            )
-
-        # Record metrics before dropping
-        self._metrics.summarize_count += 1
-        self._metrics.summarize_prompt_tokens_before.append(self._last_prompt_tokens)
-        self._metrics.summarize_completion_tokens_before.append(
-            self._total_usage.completion_tokens
-        )
-        self._metrics.turns_between_summarizes.append(
-            self._metrics.turns_since_last_summarize
-        )
-        self._metrics.summarize_summary_lengths.append(len(summary))
-        self._metrics.summarize_total_turns_dropped += num_turns
-
-        # Estimate dropped tokens proportional to turns dropped
-        if self._metrics.turns > 0:
-            prompt_per_turn = self._last_prompt_tokens / self._metrics.turns
-            completion_per_turn = (
-                self._total_usage.completion_tokens / self._metrics.turns
-            )
-            self._metrics.summarize_prompt_tokens_dropped.append(
-                int(prompt_per_turn * num_turns)
-            )
-            self._metrics.summarize_completion_tokens_dropped.append(
-                int(completion_per_turn * num_turns)
-            )
-
-        # Reset turn counter for next summarize interval
-        self._turn_at_last_summarize = self._metrics.turns
-
-        start = self._dropped_turn_count
-        end = start + num_turns - 1
-        self._summaries.append(f"[turns {start}-{end}] {summary}")
-        self._dropped_turn_count += num_turns
-        return SummarizeResult(
-            content="\n\n".join(self._summaries),
-            num_turns=num_turns,
-            flush_repl_state=flush_repl_state,
+    def _tool_context(self, messages: list[dict]) -> ToolContext:
+        return ToolContext(
+            messages=messages,
+            metrics=self._metrics,
+            total_usage=self._total_usage,
+            last_prompt_tokens=self._last_prompt_tokens,
+            exec_timeout=self.exec_timeout,
+            repl=self._repl,
+            state=self._tool_state,
         )
 
     @staticmethod
@@ -396,8 +338,8 @@ class RLMEngine:
                 end += 1
         del messages[start:end]
 
-    def _execute_tool(self, name: str, args: dict) -> str:
-        if name == "ipython":
-            timeout = args.get("timeout") or self.exec_timeout
-            return self._repl.execute(args["code"], timeout=timeout)
-        return f"Error: unknown tool '{name}'"
+    @staticmethod
+    def _unknown_tool_result(name: str):
+        from rlm.tools.base import ToolOutcome
+
+        return ToolOutcome(content=f"Error: unknown tool '{name}'")

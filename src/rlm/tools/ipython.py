@@ -1,55 +1,23 @@
-"""Tool definitions and execution."""
+"""Builtin IPython tool and persistent REPL implementation."""
 
 from __future__ import annotations
 
 import copy
-from importlib import metadata
 import os
+from pathlib import Path
 from queue import Empty
 import re
 import sys
 import threading
 import time
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from rlm.tools.base import ToolContext, ToolOutcome
+from rlm.tools.skills import TASK_SKILLS_DIR
 
 if TYPE_CHECKING:
     from rlm.session import Session
 
-
-TASK_SKILLS_DIR = Path("/task/rlm-skills")
-
-
-def _find_skills_dir() -> Path | None:
-    """Locate the skills/ directory when available.
-
-    Skills are uploaded by the environment (e.g. ``ComposableEnv``) to
-    ``/task/rlm-skills`` before ``install.sh`` runs.  This is the only
-    location the agent looks at; rlm itself no longer bundles skills.
-    """
-    return TASK_SKILLS_DIR if TASK_SKILLS_DIR.is_dir() else None
-
-
-SKILLS_DIR = _find_skills_dir()
-
-
-def _normalize_skill_name(name: str) -> str:
-    """Normalize a discovered skill token to the import/CLI form."""
-    return name.replace("-", "_")
-
-
-def get_installed_skills() -> list[str]:
-    """Return installed skill names discovered from distribution metadata."""
-    skills: set[str] = set()
-    prefix = "rlm-skill-"
-    for dist in metadata.distributions():
-        name = dist.metadata.get("Name", "")
-        if name.startswith(prefix):
-            skills.add(_normalize_skill_name(name[len(prefix) :]))
-    return sorted(skills)
-
-
-# -- Tool schemas --
 
 IPYTHON_SCHEMA = {
     "type": "function",
@@ -70,7 +38,7 @@ IPYTHON_SCHEMA = {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": None,  # filled by get_active_tools()
+                    "description": None,  # filled by schema()
                 },
             },
             "required": ["code"],
@@ -78,43 +46,46 @@ IPYTHON_SCHEMA = {
     },
 }
 
-SUMMARIZE_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "summarize",
-        "description": (
-            "Summarize and drop old turns from context to free up space. "
-            "A turn is one assistant response plus all its tool results. "
-            "Dropping num_turns removes the oldest complete turns from context. "
-            "Optionally flush the persistent IPython state after summarization."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "num_turns": {
-                    "type": "integer",
-                    "description": "Number of oldest turns to drop from context.",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "Your summary of the content being dropped.",
-                },
-                "flush_repl_state": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, restart the persistent IPython kernel after "
-                        "summarization so Python state is reset."
-                    ),
-                },
-            },
-            "required": ["num_turns", "summary"],
-        },
-    },
-}
-
-# -- IPython REPL --
-
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+IPYTHON_TIMEOUT_MAX_SECONDS = 600
+
+
+class IpythonTool:
+    """Builtin tool handler for the persistent IPython session."""
+
+    name = "ipython"
+
+    def schema(self) -> dict[str, Any]:
+        timeout = min(
+            int(os.environ.get("RLM_EXEC_TIMEOUT", "300")),
+            IPYTHON_TIMEOUT_MAX_SECONDS,
+        )
+        schema = copy.deepcopy(IPYTHON_SCHEMA)
+        schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
+            "Optional timeout in seconds. "
+            f"Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
+        )
+        return schema
+
+    def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
+        code = args.get("code", "")
+        if not isinstance(code, str):
+            code = str(code)
+
+        timeout = args.get("timeout")
+        if timeout is None:
+            timeout = context.exec_timeout
+        else:
+            try:
+                timeout = int(timeout)
+            except (TypeError, ValueError):
+                timeout = context.exec_timeout
+        timeout = min(timeout, IPYTHON_TIMEOUT_MAX_SECONDS)
+
+        if context.repl is None:
+            return ToolOutcome(content="Error: IPython REPL is not available")
+
+        return ToolOutcome(content=context.repl.execute(code, timeout=timeout))
 
 
 class IPythonREPL:
@@ -133,7 +104,6 @@ class IPythonREPL:
 
         kernel_python = os.environ.get("RLM_KERNEL_PYTHON") or sys.executable
         self._km = KernelManager()
-        # Point the kernel spec at the desired Python interpreter.
         self._km.kernel_spec.argv = [
             kernel_python,
             "-m",
@@ -151,8 +121,7 @@ class IPythonREPL:
         """Set up kernel: cwd, nest_asyncio, env vars, skill shims."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
-        # Path to kernel_shim.py in the rlm source tree
-        shim_path = str(Path(__file__).resolve().parent)
+        shim_file = str(Path(__file__).resolve().parent.parent / "kernel_shim.py")
         skills_dir = str(TASK_SKILLS_DIR)
 
         setup_code = f"""\
@@ -170,7 +139,7 @@ import asyncio
 # even when the kernel runs in a different Python.  Load kernel_shim
 # directly by path to avoid triggering rlm's __init__ (which needs openai).
 import importlib.util as _ilu
-_spec = _ilu.spec_from_file_location("kernel_shim", {shim_path + "/kernel_shim.py"!r})
+_spec = _ilu.spec_from_file_location("kernel_shim", {shim_file!r})
 _shim = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_shim)
 _shim.install_shims({skills_dir!r})
@@ -246,7 +215,6 @@ _shim.install_shims({skills_dir!r})
                     )
                     break
 
-                # Only process messages from this execution
                 if msg["parent_header"].get("msg_id") != msg_id:
                     continue
 
@@ -266,7 +234,6 @@ _shim.install_shims({skills_dir!r})
                 elif msg_type == "status" and content["execution_state"] == "idle":
                     break
         finally:
-            # Always drain the shell reply
             try:
                 self._kc.get_shell_msg(timeout=5)
             except Exception:
@@ -282,13 +249,3 @@ _shim.install_shims({skills_dir!r})
         if self._km:
             self._km.shutdown_kernel(now=True)
             self._km = None
-
-
-def get_active_tools() -> list[dict]:
-    """Return OpenAI tool schemas with runtime defaults baked in."""
-    timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
-    schema = copy.deepcopy(IPYTHON_SCHEMA)
-    schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
-        f"Optional timeout in seconds. Default: {timeout}s."
-    )
-    return [schema, SUMMARIZE_SCHEMA]

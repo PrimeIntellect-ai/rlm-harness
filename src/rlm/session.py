@@ -54,7 +54,7 @@ class Session:
                 "type": "tool_result",
                 "turn": turn,
                 "tool": tool,
-                "content": content[:2000],  # cap for readability
+                "content": content,
                 "duration": round(duration, 3),
             }
         )
