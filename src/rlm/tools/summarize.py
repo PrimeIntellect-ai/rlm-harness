@@ -53,6 +53,24 @@ class SummarizeState:
     turn_at_last_summarize: int = 0
 
 
+def summarize_drop_slice_bounds(
+    messages: list[dict[str, Any]], num_turns: int
+) -> tuple[int, int]:
+    """Return the message slice that would be dropped for ``num_turns``."""
+    start = 0
+    while start < len(messages) and messages[start]["role"] != "assistant":
+        start += 1
+
+    end = start
+    for _ in range(num_turns):
+        if end >= len(messages) or messages[end]["role"] != "assistant":
+            break
+        end += 1
+        while end < len(messages) and messages[end]["role"] == "tool":
+            end += 1
+    return start, end
+
+
 class SummarizeTool:
     """Builtin tool handler for context summarization."""
 
@@ -127,17 +145,7 @@ class SummarizeTool:
     def _dropped_message_slice(
         cls, messages: list[dict[str, Any]], num_turns: int
     ) -> list[dict[str, Any]]:
-        start = 0
-        while start < len(messages) and messages[start]["role"] != "assistant":
-            start += 1
-
-        end = start
-        for _ in range(num_turns):
-            if end >= len(messages) or messages[end]["role"] != "assistant":
-                break
-            end += 1
-            while end < len(messages) and messages[end]["role"] == "tool":
-                end += 1
+        start, end = summarize_drop_slice_bounds(messages, num_turns)
         return messages[start:end]
 
     @classmethod
