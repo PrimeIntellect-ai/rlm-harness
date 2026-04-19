@@ -18,11 +18,6 @@ class TokenUsage:
 
 
 @dataclass(frozen=True)
-class BuiltinToolCalled:
-    name: str
-
-
-@dataclass(frozen=True)
 class IpythonExecuted:
     input_chars: int
     input_loc: int
@@ -38,16 +33,10 @@ class SummarizeApplied:
     num_turns: int
     summary_chars: int
     dropped_chars: int
-    prompt_tokens_before: int
-    completion_tokens_before: int
-    prompt_tokens_dropped: int
-    completion_tokens_dropped: int
     turns_since_last_summarize: int
 
 
-BuiltinMetricEvent = (
-    BuiltinToolCalled | IpythonExecuted | SummarizeRejected | SummarizeApplied
-)
+BuiltinMetricEvent = IpythonExecuted | SummarizeRejected | SummarizeApplied
 
 
 @dataclass
@@ -60,26 +49,20 @@ class RLMMetrics:
     turns_between_summarizes: list[int] = field(default_factory=list)
 
     # Summarize metrics
-    summarize_count: int = 0
     summarize_rejected_count: int = 0
-    summarize_total_turns_dropped: int = 0
+    summarize_turns_dropped_total: int = 0
     summarize_summary_lengths: list[int] = field(default_factory=list)
     summarize_chars_dropped_total: int = 0
     summarize_summary_chars_total: int = 0
 
-    # Builtin tool metrics
-    builtin_tool_calls_total: int = 0
-    ipython_calls: int = 0
+    # IPython input size metrics
     ipython_input_chars_total: int = 0
     ipython_input_chars_mean: float = 0.0
     ipython_input_loc_total: int = 0
     ipython_input_loc_mean: float = 0.0
 
-    # Token metrics before/dropped per summarize
-    summarize_prompt_tokens_before: list[int] = field(default_factory=list)
-    summarize_completion_tokens_before: list[int] = field(default_factory=list)
-    summarize_prompt_tokens_dropped: list[int] = field(default_factory=list)
-    summarize_completion_tokens_dropped: list[int] = field(default_factory=list)
+    # Internal counters for derived metrics
+    _ipython_call_count: int = field(default=0, repr=False)
 
     # This agent's token usage
     prompt_tokens: int = 0
@@ -95,36 +78,21 @@ class RLMMetrics:
     sub_rlm_completion_tokens: int = 0
     sub_rlm_count: int = 0
 
-    # Budget tracking
-    max_turns: int = 0
-    max_tokens: int = 0
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
     def record(self, event: BuiltinMetricEvent) -> None:
-        if isinstance(event, BuiltinToolCalled):
-            self.builtin_tool_calls_total += 1
-            if event.name == "ipython":
-                self.ipython_calls += 1
-        elif isinstance(event, IpythonExecuted):
+        if isinstance(event, IpythonExecuted):
+            self._ipython_call_count += 1
             self.ipython_input_chars_total += event.input_chars
             self.ipython_input_loc_total += event.input_loc
         elif isinstance(event, SummarizeRejected):
             self.summarize_rejected_count += 1
         elif isinstance(event, SummarizeApplied):
-            self.summarize_count += 1
             self.turns_between_summarizes.append(event.turns_since_last_summarize)
-            self.summarize_total_turns_dropped += event.num_turns
+            self.summarize_turns_dropped_total += event.num_turns
             self.summarize_summary_lengths.append(event.summary_chars)
             self.summarize_chars_dropped_total += event.dropped_chars
             self.summarize_summary_chars_total += event.summary_chars
-            self.summarize_prompt_tokens_before.append(event.prompt_tokens_before)
-            self.summarize_completion_tokens_before.append(
-                event.completion_tokens_before
-            )
-            self.summarize_prompt_tokens_dropped.append(event.prompt_tokens_dropped)
-            self.summarize_completion_tokens_dropped.append(
-                event.completion_tokens_dropped
-            )
         else:
             raise TypeError(f"Unsupported builtin metric event: {type(event)!r}")
 
@@ -132,19 +100,21 @@ class RLMMetrics:
 
     def _refresh_derived_metrics(self) -> None:
         self.ipython_input_chars_mean = (
-            self.ipython_input_chars_total / self.ipython_calls
-            if self.ipython_calls
+            self.ipython_input_chars_total / self._ipython_call_count
+            if self._ipython_call_count
             else 0.0
         )
         self.ipython_input_loc_mean = (
-            self.ipython_input_loc_total / self.ipython_calls
-            if self.ipython_calls
+            self.ipython_input_loc_total / self._ipython_call_count
+            if self._ipython_call_count
             else 0.0
         )
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
-        return asdict(self)
+        return {
+            key: value for key, value in asdict(self).items() if not key.startswith("_")
+        }
 
 
 @dataclass

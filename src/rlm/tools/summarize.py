@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
-from rlm.types import BuiltinToolCalled, SummarizeApplied, SummarizeRejected
+from rlm.types import SummarizeApplied, SummarizeRejected
 
 
 SUMMARIZE_SCHEMA = {
@@ -71,7 +71,6 @@ class SummarizeTool:
         summary = self._as_text(args.get("summary", ""))
         flush_repl_state = bool(args.get("flush_repl_state", False))
         droppable = self._count_droppable_turns(context.messages)
-        builtin_call = BuiltinToolCalled(self.name)
 
         if not isinstance(num_turns, int) or num_turns <= 0:
             return ToolOutcome(
@@ -79,7 +78,7 @@ class SummarizeTool:
                     "[no-op] num_turns is required and must be > 0 "
                     f"(got {num_turns}). No context was dropped."
                 ),
-                metric_events=[builtin_call, SummarizeRejected()],
+                metric_events=[SummarizeRejected()],
             )
         if num_turns > droppable:
             return ToolOutcome(
@@ -87,15 +86,12 @@ class SummarizeTool:
                     f"[no-op] num_turns={num_turns} exceeds droppable turns "
                     f"({droppable}). No context was dropped."
                 ),
-                metric_events=[builtin_call, SummarizeRejected()],
+                metric_events=[SummarizeRejected()],
             )
 
         summary_chars = len(summary)
         dropped_messages = self._dropped_message_slice(context.messages, num_turns)
         dropped_chars = self._count_content_chars(dropped_messages)
-        prompt_tokens_dropped, completion_tokens_dropped = self._estimate_tokens_dropped(
-            context, num_turns
-        )
 
         state.turn_at_last_summarize = context.metrics.turns
         start = state.dropped_turn_count
@@ -108,15 +104,10 @@ class SummarizeTool:
             drop_turns=num_turns,
             flush_repl_state=flush_repl_state,
             metric_events=[
-                builtin_call,
                 SummarizeApplied(
                     num_turns=num_turns,
                     summary_chars=summary_chars,
                     dropped_chars=dropped_chars,
-                    prompt_tokens_before=context.last_prompt_tokens,
-                    completion_tokens_before=context.total_usage.completion_tokens,
-                    prompt_tokens_dropped=prompt_tokens_dropped,
-                    completion_tokens_dropped=completion_tokens_dropped,
                     turns_since_last_summarize=context.metrics.turns_since_last_summarize,
                 ),
             ],
@@ -199,16 +190,3 @@ class SummarizeTool:
         if arguments is not None:
             total += len(cls._as_text(arguments))
         return total
-
-    @staticmethod
-    def _estimate_tokens_dropped(
-        context: ToolContext, num_turns: int
-    ) -> tuple[int, int]:
-        if context.metrics.turns <= 0:
-            return 0, 0
-        prompt_per_turn = context.last_prompt_tokens / context.metrics.turns
-        completion_per_turn = context.total_usage.completion_tokens / context.metrics.turns
-        return (
-            int(prompt_per_turn * num_turns),
-            int(completion_per_turn * num_turns),
-        )

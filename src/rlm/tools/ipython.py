@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.skills import TASK_SKILLS_DIR
-from rlm.types import BuiltinToolCalled, IpythonExecuted
+from rlm.types import IpythonExecuted
 
 if TYPE_CHECKING:
     from rlm.session import Session
@@ -74,10 +74,7 @@ class IpythonTool:
             code = str(code)
         input_chars = len(code)
         input_loc = self._count_nonempty_lines(code)
-        metric_events = [
-            BuiltinToolCalled(self.name),
-            IpythonExecuted(input_chars=input_chars, input_loc=input_loc),
-        ]
+        metric_events = [IpythonExecuted(input_chars=input_chars, input_loc=input_loc)]
 
         timeout = args.get("timeout")
         if timeout is None:

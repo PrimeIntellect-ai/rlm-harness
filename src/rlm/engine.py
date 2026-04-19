@@ -72,10 +72,7 @@ class RLMEngine:
         self._last_prompt_tokens = 0
 
         # Metrics
-        self._metrics = RLMMetrics(
-            max_turns=self.max_turns,
-            max_tokens=self.max_tokens or 0,
-        )
+        self._metrics = RLMMetrics()
 
         self._tool_state = {"summarize": SummarizeState()}
 
