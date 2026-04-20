@@ -70,12 +70,10 @@ class RLMMetrics:
     _summarize_summary_chars_total: int = field(default=0, repr=False)
 
     # Public work/cost token metrics
-    root_input_tokens: int = 0
-    root_output_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     sub_rlm_input_tokens: int = 0
     sub_rlm_output_tokens: int = 0
-    input_tokens_total: int = 0
-    output_tokens_total: int = 0
 
     # Root terminal branch context
     final_input_tokens: int = 0
@@ -84,24 +82,6 @@ class RLMMetrics:
     # Root branch context exposure
     branch_input_tokens_mean: float = 0.0
     branch_input_tokens_max: int = 0
-    branch_output_tokens_mean: float = 0.0
-    branch_output_tokens_max: int = 0
-
-    # Aggregated from children
-    sub_rlm_count: int = 0
-    sub_rlm_final_input_tokens: int = 0
-    sub_rlm_final_output_tokens: int = 0
-    sub_rlm_branch_count: int = 0
-    sub_rlm_branch_input_tokens_sum: int = 0
-    sub_rlm_branch_input_tokens_max: int = 0
-    sub_rlm_branch_output_tokens_sum: int = 0
-    sub_rlm_branch_output_tokens_max: int = 0
-
-    # All-agent branch context exposure
-    all_agents_branch_input_tokens_mean: float = 0.0
-    all_agents_branch_input_tokens_max: int = 0
-    all_agents_branch_output_tokens_mean: float = 0.0
-    all_agents_branch_output_tokens_max: int = 0
 
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
@@ -125,6 +105,14 @@ class RLMMetrics:
     _branch_output_tokens_max: int = field(default=0, repr=False)
     _root_input_tokens: int = field(default=0, repr=False)
     _root_output_tokens: int = field(default=0, repr=False)
+    _sub_rlm_count: int = field(default=0, repr=False)
+    _sub_rlm_final_input_tokens: int = field(default=0, repr=False)
+    _sub_rlm_final_output_tokens: int = field(default=0, repr=False)
+    _sub_rlm_branch_count: int = field(default=0, repr=False)
+    _sub_rlm_branch_input_tokens_sum: int = field(default=0, repr=False)
+    _sub_rlm_branch_input_tokens_max: int = field(default=0, repr=False)
+    _sub_rlm_branch_output_tokens_sum: int = field(default=0, repr=False)
+    _sub_rlm_branch_output_tokens_max: int = field(default=0, repr=False)
 
     def note_root_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
         self._root_input_tokens = prompt_tokens
@@ -169,40 +157,44 @@ class RLMMetrics:
         self._refresh_derived_metrics()
 
     def apply_child_aggregates(self, stats: dict[str, int]) -> None:
-        self.sub_rlm_count = stats.get("session_count", 0)
+        self._sub_rlm_count = stats.get("session_count", 0)
         self.sub_rlm_input_tokens = stats.get("input_tokens_total", 0)
         self.sub_rlm_output_tokens = stats.get("output_tokens_total", 0)
-        self.sub_rlm_final_input_tokens = stats.get("final_input_tokens_total", 0)
-        self.sub_rlm_final_output_tokens = stats.get("final_output_tokens_total", 0)
-        self.sub_rlm_branch_count = stats.get("branch_count", 0)
-        self.sub_rlm_branch_input_tokens_sum = stats.get("branch_input_tokens_sum", 0)
-        self.sub_rlm_branch_input_tokens_max = stats.get("branch_input_tokens_max", 0)
-        self.sub_rlm_branch_output_tokens_sum = stats.get("branch_output_tokens_sum", 0)
-        self.sub_rlm_branch_output_tokens_max = stats.get("branch_output_tokens_max", 0)
+        self._sub_rlm_final_input_tokens = stats.get("final_input_tokens_total", 0)
+        self._sub_rlm_final_output_tokens = stats.get("final_output_tokens_total", 0)
+        self._sub_rlm_branch_count = stats.get("branch_count", 0)
+        self._sub_rlm_branch_input_tokens_sum = stats.get("branch_input_tokens_sum", 0)
+        self._sub_rlm_branch_input_tokens_max = stats.get("branch_input_tokens_max", 0)
+        self._sub_rlm_branch_output_tokens_sum = stats.get(
+            "branch_output_tokens_sum", 0
+        )
+        self._sub_rlm_branch_output_tokens_max = stats.get(
+            "branch_output_tokens_max", 0
+        )
         self._refresh_derived_metrics()
 
     def context_token_stats(self) -> dict[str, int]:
         self._refresh_derived_metrics()
         return {
-            "session_count": 1 + self.sub_rlm_count,
-            "input_tokens_total": self.input_tokens_total,
-            "output_tokens_total": self.output_tokens_total,
+            "session_count": 1 + self._sub_rlm_count,
+            "input_tokens_total": self.input_tokens,
+            "output_tokens_total": self.output_tokens,
             "final_input_tokens_total": self.final_input_tokens
-            + self.sub_rlm_final_input_tokens,
+            + self._sub_rlm_final_input_tokens,
             "final_output_tokens_total": self.final_output_tokens
-            + self.sub_rlm_final_output_tokens,
-            "branch_count": self._branch_count + self.sub_rlm_branch_count,
+            + self._sub_rlm_final_output_tokens,
+            "branch_count": self._branch_count + self._sub_rlm_branch_count,
             "branch_input_tokens_sum": self._branch_input_tokens_sum
-            + self.sub_rlm_branch_input_tokens_sum,
+            + self._sub_rlm_branch_input_tokens_sum,
             "branch_input_tokens_max": max(
                 self._branch_input_tokens_max,
-                self.sub_rlm_branch_input_tokens_max,
+                self._sub_rlm_branch_input_tokens_max,
             ),
             "branch_output_tokens_sum": self._branch_output_tokens_sum
-            + self.sub_rlm_branch_output_tokens_sum,
+            + self._sub_rlm_branch_output_tokens_sum,
             "branch_output_tokens_max": max(
                 self._branch_output_tokens_max,
-                self.sub_rlm_branch_output_tokens_max,
+                self._sub_rlm_branch_output_tokens_max,
             ),
         }
 
@@ -230,10 +222,8 @@ class RLMMetrics:
         self._refresh_derived_metrics()
 
     def _refresh_derived_metrics(self) -> None:
-        self.root_input_tokens = self._root_input_tokens
-        self.root_output_tokens = self._root_output_tokens
-        self.input_tokens_total = self.root_input_tokens + self.sub_rlm_input_tokens
-        self.output_tokens_total = self.root_output_tokens + self.sub_rlm_output_tokens
+        self.input_tokens = self._root_input_tokens + self.sub_rlm_input_tokens
+        self.output_tokens = self._root_output_tokens + self.sub_rlm_output_tokens
 
         if self._ipython_call_count:
             self.ipython_input_chars_mean = (
@@ -261,33 +251,6 @@ class RLMMetrics:
                 self._branch_input_tokens_sum / self._branch_count
             )
             self.branch_input_tokens_max = self._branch_input_tokens_max
-            self.branch_output_tokens_mean = (
-                self._branch_output_tokens_sum / self._branch_count
-            )
-            self.branch_output_tokens_max = self._branch_output_tokens_max
-
-        all_branch_count = self._branch_count + self.sub_rlm_branch_count
-        if all_branch_count:
-            all_branch_input_sum = (
-                self._branch_input_tokens_sum + self.sub_rlm_branch_input_tokens_sum
-            )
-            all_branch_output_sum = (
-                self._branch_output_tokens_sum + self.sub_rlm_branch_output_tokens_sum
-            )
-            self.all_agents_branch_input_tokens_mean = (
-                all_branch_input_sum / all_branch_count
-            )
-            self.all_agents_branch_output_tokens_mean = (
-                all_branch_output_sum / all_branch_count
-            )
-            self.all_agents_branch_input_tokens_max = max(
-                self._branch_input_tokens_max,
-                self.sub_rlm_branch_input_tokens_max,
-            )
-            self.all_agents_branch_output_tokens_max = max(
-                self._branch_output_tokens_max,
-                self.sub_rlm_branch_output_tokens_max,
-            )
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
