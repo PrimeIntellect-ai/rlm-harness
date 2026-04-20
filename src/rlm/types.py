@@ -80,6 +80,8 @@ class RLMMetrics:
     # Root branch context exposure
     branch_input_tokens_mean: float = 0.0
     branch_input_tokens_max: int = 0
+    branch_output_tokens_mean: float = 0.0
+    branch_output_tokens_max: int = 0
 
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
@@ -247,6 +249,10 @@ class RLMMetrics:
                 self._branch_input_tokens_sum / self._branch_count
             )
             self.branch_input_tokens_max = self._branch_input_tokens_max
+            self.branch_output_tokens_mean = (
+                self._branch_output_tokens_sum / self._branch_count
+            )
+            self.branch_output_tokens_max = self._branch_output_tokens_max
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
