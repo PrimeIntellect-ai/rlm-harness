@@ -51,26 +51,6 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 IPYTHON_TIMEOUT_MAX_SECONDS = 600
 
 
-def _maybe_truncate_output(content: str) -> str:
-    """Cap ``content`` at ``RLM_MAX_TOOL_OUTPUT_CHARS`` if that env var is set.
-
-    Keeps the head and tail so tracebacks at the end survive. Off by default.
-    """
-    cap_env = os.environ.get("RLM_MAX_TOOL_OUTPUT_CHARS")
-    if not cap_env:
-        return content
-    try:
-        cap = int(cap_env)
-    except ValueError:
-        return content
-    if cap <= 0 or len(content) <= cap:
-        return content
-    head = cap // 2
-    tail = cap - head
-    dropped = len(content) - cap
-    return f"{content[:head]}\n...[{dropped} chars truncated]...\n{content[-tail:]}"
-
-
 class IpythonTool:
     """Builtin tool handler for the persistent IPython session."""
 
@@ -113,13 +93,22 @@ class IpythonTool:
             )
 
         return ToolOutcome(
-            content=_maybe_truncate_output(context.repl.execute(code, timeout=timeout)),
+            content=self._maybe_truncate_output(context.repl.execute(code, timeout=timeout)),
             metric_events=metric_events,
         )
 
     @staticmethod
     def _count_nonempty_lines(code: str) -> int:
         return sum(1 for line in code.splitlines() if line.strip())
+
+    @staticmethod
+    def _maybe_truncate_output(content: str) -> str:
+        """Truncate ``content`` to ``RLM_MAX_TOOL_OUTPUT_CHARS`` if set (off by default)."""
+        cap = int(os.environ.get("RLM_MAX_TOOL_OUTPUT_CHARS", "-1"))
+        if cap <= 0 or len(content) <= cap:
+            return content
+        head, tail = cap // 2, cap - cap // 2
+        return f"{content[:head]}\n...[{len(content) - cap} chars truncated]...\n{content[-tail:]}"
 
 
 class IPythonREPL:
