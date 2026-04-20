@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -68,19 +69,39 @@ class RLMMetrics:
     _summarize_chars_dropped_total: int = field(default=0, repr=False)
     _summarize_summary_chars_total: int = field(default=0, repr=False)
 
-    # This agent's token usage
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    # Public work/cost token metrics
+    root_input_tokens: int = 0
+    root_output_tokens: int = 0
+    sub_rlm_input_tokens: int = 0
+    sub_rlm_output_tokens: int = 0
+    input_tokens_total: int = 0
+    output_tokens_total: int = 0
 
-    # Per-turn token counts from the API (for computing tool result tokens etc.)
-    # tool_result_tokens[i] ≈ prompt_tokens_per_turn[i+1] - prompt_tokens_per_turn[i] - completion_tokens_per_turn[i]
-    prompt_tokens_per_turn: list[int] = field(default_factory=list)
-    completion_tokens_per_turn: list[int] = field(default_factory=list)
+    # Root terminal branch context
+    final_input_tokens: int = 0
+    final_output_tokens: int = 0
+
+    # Root branch context exposure
+    branch_input_tokens_mean: float = 0.0
+    branch_input_tokens_max: int = 0
+    branch_output_tokens_mean: float = 0.0
+    branch_output_tokens_max: int = 0
 
     # Aggregated from children
-    sub_rlm_prompt_tokens: int = 0
-    sub_rlm_completion_tokens: int = 0
     sub_rlm_count: int = 0
+    sub_rlm_final_input_tokens: int = 0
+    sub_rlm_final_output_tokens: int = 0
+    sub_rlm_branch_count: int = 0
+    sub_rlm_branch_input_tokens_sum: int = 0
+    sub_rlm_branch_input_tokens_max: int = 0
+    sub_rlm_branch_output_tokens_sum: int = 0
+    sub_rlm_branch_output_tokens_max: int = 0
+
+    # All-agent branch context exposure
+    all_agents_branch_input_tokens_mean: float = 0.0
+    all_agents_branch_input_tokens_max: int = 0
+    all_agents_branch_output_tokens_mean: float = 0.0
+    all_agents_branch_output_tokens_max: int = 0
 
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
@@ -91,6 +112,99 @@ class RLMMetrics:
     @turns.setter
     def turns(self, value: int) -> None:
         self._turns = value
+
+    # Internal context-token tracker state
+    _retained_completion_tokens: deque[int] = field(default_factory=deque, repr=False)
+    _retained_completion_tokens_total: int = field(default=0, repr=False)
+    _current_branch_input_tokens: int | None = field(default=None, repr=False)
+    _current_branch_output_tokens: int | None = field(default=None, repr=False)
+    _branch_count: int = field(default=0, repr=False)
+    _branch_input_tokens_sum: int = field(default=0, repr=False)
+    _branch_input_tokens_max: int = field(default=0, repr=False)
+    _branch_output_tokens_sum: int = field(default=0, repr=False)
+    _branch_output_tokens_max: int = field(default=0, repr=False)
+    _root_input_tokens: int = field(default=0, repr=False)
+    _root_output_tokens: int = field(default=0, repr=False)
+
+    def note_root_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
+        self._root_input_tokens = prompt_tokens
+        self._root_output_tokens = completion_tokens
+        self._refresh_derived_metrics()
+
+    def note_assistant_turn(self, prompt_tokens: int, completion_tokens: int) -> None:
+        self._retained_completion_tokens.append(completion_tokens)
+        self._retained_completion_tokens_total += completion_tokens
+
+        turn_total_tokens = prompt_tokens + completion_tokens
+        visible_output_tokens = self._retained_completion_tokens_total
+        visible_input_tokens = max(0, turn_total_tokens - visible_output_tokens)
+
+        self._current_branch_input_tokens = visible_input_tokens
+        self._current_branch_output_tokens = visible_output_tokens
+        self._refresh_derived_metrics()
+
+    def finalize_current_branch(self) -> None:
+        if (
+            self._current_branch_input_tokens is None
+            or self._current_branch_output_tokens is None
+        ):
+            return
+
+        self._branch_count += 1
+        self._branch_input_tokens_sum += self._current_branch_input_tokens
+        self._branch_output_tokens_sum += self._current_branch_output_tokens
+        self._branch_input_tokens_max = max(
+            self._branch_input_tokens_max,
+            self._current_branch_input_tokens,
+        )
+        self._branch_output_tokens_max = max(
+            self._branch_output_tokens_max,
+            self._current_branch_output_tokens,
+        )
+
+        self.final_input_tokens = self._current_branch_input_tokens
+        self.final_output_tokens = self._current_branch_output_tokens
+        self._current_branch_input_tokens = None
+        self._current_branch_output_tokens = None
+        self._refresh_derived_metrics()
+
+    def apply_child_aggregates(self, stats: dict[str, int]) -> None:
+        self.sub_rlm_count = stats.get("session_count", 0)
+        self.sub_rlm_input_tokens = stats.get("input_tokens_total", 0)
+        self.sub_rlm_output_tokens = stats.get("output_tokens_total", 0)
+        self.sub_rlm_final_input_tokens = stats.get("final_input_tokens_total", 0)
+        self.sub_rlm_final_output_tokens = stats.get("final_output_tokens_total", 0)
+        self.sub_rlm_branch_count = stats.get("branch_count", 0)
+        self.sub_rlm_branch_input_tokens_sum = stats.get("branch_input_tokens_sum", 0)
+        self.sub_rlm_branch_input_tokens_max = stats.get("branch_input_tokens_max", 0)
+        self.sub_rlm_branch_output_tokens_sum = stats.get("branch_output_tokens_sum", 0)
+        self.sub_rlm_branch_output_tokens_max = stats.get("branch_output_tokens_max", 0)
+        self._refresh_derived_metrics()
+
+    def context_token_stats(self) -> dict[str, int]:
+        self._refresh_derived_metrics()
+        return {
+            "session_count": 1 + self.sub_rlm_count,
+            "input_tokens_total": self.input_tokens_total,
+            "output_tokens_total": self.output_tokens_total,
+            "final_input_tokens_total": self.final_input_tokens
+            + self.sub_rlm_final_input_tokens,
+            "final_output_tokens_total": self.final_output_tokens
+            + self.sub_rlm_final_output_tokens,
+            "branch_count": self._branch_count + self.sub_rlm_branch_count,
+            "branch_input_tokens_sum": self._branch_input_tokens_sum
+            + self.sub_rlm_branch_input_tokens_sum,
+            "branch_input_tokens_max": max(
+                self._branch_input_tokens_max,
+                self.sub_rlm_branch_input_tokens_max,
+            ),
+            "branch_output_tokens_sum": self._branch_output_tokens_sum
+            + self.sub_rlm_branch_output_tokens_sum,
+            "branch_output_tokens_max": max(
+                self._branch_output_tokens_max,
+                self.sub_rlm_branch_output_tokens_max,
+            ),
+        }
 
     def record(self, event: BuiltinMetricEvent) -> None:
         if isinstance(event, IpythonExecuted):
@@ -105,12 +219,22 @@ class RLMMetrics:
             self._summarize_turns_dropped_total += event.num_turns
             self._summarize_chars_dropped_total += event.dropped_chars
             self._summarize_summary_chars_total += event.summary_chars
+            self.finalize_current_branch()
+            for _ in range(min(event.num_turns, len(self._retained_completion_tokens))):
+                self._retained_completion_tokens_total -= (
+                    self._retained_completion_tokens.popleft()
+                )
         else:
             raise TypeError(f"Unsupported builtin metric event: {type(event)!r}")
 
         self._refresh_derived_metrics()
 
     def _refresh_derived_metrics(self) -> None:
+        self.root_input_tokens = self._root_input_tokens
+        self.root_output_tokens = self._root_output_tokens
+        self.input_tokens_total = self.root_input_tokens + self.sub_rlm_input_tokens
+        self.output_tokens_total = self.root_output_tokens + self.sub_rlm_output_tokens
+
         if self._ipython_call_count:
             self.ipython_input_chars_mean = (
                 self._ipython_input_chars_total / self._ipython_call_count
@@ -130,6 +254,39 @@ class RLMMetrics:
             )
             self.summarize_summary_chars_mean = (
                 self._summarize_summary_chars_total / self._summarize_applied_count
+            )
+
+        if self._branch_count:
+            self.branch_input_tokens_mean = (
+                self._branch_input_tokens_sum / self._branch_count
+            )
+            self.branch_input_tokens_max = self._branch_input_tokens_max
+            self.branch_output_tokens_mean = (
+                self._branch_output_tokens_sum / self._branch_count
+            )
+            self.branch_output_tokens_max = self._branch_output_tokens_max
+
+        all_branch_count = self._branch_count + self.sub_rlm_branch_count
+        if all_branch_count:
+            all_branch_input_sum = (
+                self._branch_input_tokens_sum + self.sub_rlm_branch_input_tokens_sum
+            )
+            all_branch_output_sum = (
+                self._branch_output_tokens_sum + self.sub_rlm_branch_output_tokens_sum
+            )
+            self.all_agents_branch_input_tokens_mean = (
+                all_branch_input_sum / all_branch_count
+            )
+            self.all_agents_branch_output_tokens_mean = (
+                all_branch_output_sum / all_branch_count
+            )
+            self.all_agents_branch_input_tokens_max = max(
+                self._branch_input_tokens_max,
+                self.sub_rlm_branch_input_tokens_max,
+            )
+            self.all_agents_branch_output_tokens_max = max(
+                self._branch_output_tokens_max,
+                self.sub_rlm_branch_output_tokens_max,
             )
 
     def to_dict(self) -> dict[str, Any]:

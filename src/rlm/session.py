@@ -62,34 +62,52 @@ class Session:
     def log_sub_spawn(self, child_name: str, command: str):
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
 
-    def aggregate_child_metrics(self) -> tuple[int, int, int]:
-        """Read all sub-*/meta.json and sum their token usage.
-
-        Returns (sub_prompt_tokens, sub_completion_tokens, sub_count).
-        """
-        sub_prompt = 0
-        sub_completion = 0
-        sub_count = 0
+    def aggregate_child_metrics(self) -> dict[str, int]:
+        """Read all sub-*/meta.json and aggregate recursive session totals."""
+        totals = {
+            "session_count": 0,
+            "input_tokens_total": 0,
+            "output_tokens_total": 0,
+            "final_input_tokens_total": 0,
+            "final_output_tokens_total": 0,
+            "branch_count": 0,
+            "branch_input_tokens_sum": 0,
+            "branch_input_tokens_max": 0,
+            "branch_output_tokens_sum": 0,
+            "branch_output_tokens_max": 0,
+        }
 
         for child_dir in self.dir.glob("sub-*"):
             meta_path = child_dir / "meta.json"
             if meta_path.exists():
                 with open(meta_path) as f:
                     meta = json.load(f)
-                usage = meta.get("usage", {})
-                metrics = meta.get("metrics", {})
+                stats = meta.get("context_token_stats")
+                if not isinstance(stats, dict):
+                    raise RuntimeError(
+                        f"Missing context_token_stats in child session meta: {meta_path}"
+                    )
+                for key in (
+                    "session_count",
+                    "input_tokens_total",
+                    "output_tokens_total",
+                    "final_input_tokens_total",
+                    "final_output_tokens_total",
+                    "branch_count",
+                    "branch_input_tokens_sum",
+                    "branch_output_tokens_sum",
+                ):
+                    totals[key] += int(stats.get(key, 0))
+                totals["branch_input_tokens_max"] = max(
+                    totals["branch_input_tokens_max"],
+                    int(stats.get("branch_input_tokens_max", 0)),
+                )
+                totals["branch_output_tokens_max"] = max(
+                    totals["branch_output_tokens_max"],
+                    int(stats.get("branch_output_tokens_max", 0)),
+                )
 
-                # This child's direct usage
-                sub_prompt += usage.get("prompt_tokens", 0)
-                sub_completion += usage.get("completion_tokens", 0)
-                sub_count += 1
-
-                # Plus its children's usage (recursive aggregation)
-                sub_prompt += metrics.get("sub_rlm_prompt_tokens", 0)
-                sub_completion += metrics.get("sub_rlm_completion_tokens", 0)
-                sub_count += metrics.get("sub_rlm_count", 0)
-
-        return sub_prompt, sub_completion, sub_count
+        return totals
 
     def finalize(
         self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
@@ -103,16 +121,15 @@ class Session:
 
         # Aggregate child sub-RLM metrics
         if metrics is not None:
-            sub_prompt, sub_completion, sub_count = self.aggregate_child_metrics()
-            metrics.sub_rlm_prompt_tokens = sub_prompt
-            metrics.sub_rlm_completion_tokens = sub_completion
-            metrics.sub_rlm_count = sub_count
+            metrics.finalize_current_branch()
+            metrics.apply_child_aggregates(self.aggregate_child_metrics())
 
         meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
         if usage:
             meta_update["usage"] = usage
         if metrics is not None:
             meta_update["metrics"] = metrics.to_dict()
+            meta_update["context_token_stats"] = metrics.context_token_stats()
         self.write_meta(**meta_update)
         self._msg_file.close()
 
