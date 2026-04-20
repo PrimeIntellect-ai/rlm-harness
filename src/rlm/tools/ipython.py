@@ -93,13 +93,22 @@ class IpythonTool:
             )
 
         return ToolOutcome(
-            content=context.repl.execute(code, timeout=timeout),
+            content=self._maybe_truncate_output(context.repl.execute(code, timeout=timeout)),
             metric_events=metric_events,
         )
 
     @staticmethod
     def _count_nonempty_lines(code: str) -> int:
         return sum(1 for line in code.splitlines() if line.strip())
+
+    @staticmethod
+    def _maybe_truncate_output(content: str) -> str:
+        """Truncate ``content`` to ``RLM_MAX_TOOL_OUTPUT_CHARS`` if set (off by default)."""
+        cap = int(os.environ.get("RLM_MAX_TOOL_OUTPUT_CHARS", "-1"))
+        if cap <= 0 or len(content) <= cap:
+            return content
+        head, tail = cap // 2, cap - cap // 2
+        return f"{content[:head]}\n...[{len(content) - cap} chars truncated]...\n{content[-tail:]}"
 
 
 class IPythonREPL:
