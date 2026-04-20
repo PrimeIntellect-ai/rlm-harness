@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from rlm.types import RLMMetrics, TokenUsage
+from rlm.types import BuiltinMetricEvent, RLMMetrics, TokenUsage
 
 
 @dataclass
@@ -15,6 +15,7 @@ class ToolOutcome:
     content: str
     drop_turns: int = 0
     flush_repl_state: bool = False
+    metric_events: list[BuiltinMetricEvent] = field(default_factory=list)
 
 
 @dataclass

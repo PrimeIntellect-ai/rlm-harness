@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
+from rlm.types import SummarizeApplied, SummarizeRejected
 
 
 SUMMARIZE_SCHEMA = {
@@ -52,6 +53,24 @@ class SummarizeState:
     turn_at_last_summarize: int = 0
 
 
+def summarize_drop_slice_bounds(
+    messages: list[dict[str, Any]], num_turns: int
+) -> tuple[int, int]:
+    """Return the message slice that would be dropped for ``num_turns``."""
+    start = 0
+    while start < len(messages) and messages[start]["role"] != "assistant":
+        start += 1
+
+    end = start
+    for _ in range(num_turns):
+        if end >= len(messages) or messages[end]["role"] != "assistant":
+            break
+        end += 1
+        while end < len(messages) and messages[end]["role"] == "tool":
+            end += 1
+    return start, end
+
+
 class SummarizeTool:
     """Builtin tool handler for context summarization."""
 
@@ -72,46 +91,25 @@ class SummarizeTool:
         droppable = self._count_droppable_turns(context.messages)
 
         if not isinstance(num_turns, int) or num_turns <= 0:
-            context.metrics.summarize_rejected_count += 1
             return ToolOutcome(
                 content=(
                     "[no-op] num_turns is required and must be > 0 "
                     f"(got {num_turns}). No context was dropped."
-                )
+                ),
+                metric_events=[SummarizeRejected()],
             )
         if num_turns > droppable:
-            context.metrics.summarize_rejected_count += 1
             return ToolOutcome(
                 content=(
                     f"[no-op] num_turns={num_turns} exceeds droppable turns "
                     f"({droppable}). No context was dropped."
-                )
+                ),
+                metric_events=[SummarizeRejected()],
             )
 
-        context.metrics.summarize_count += 1
-        context.metrics.summarize_prompt_tokens_before.append(
-            context.last_prompt_tokens
-        )
-        context.metrics.summarize_completion_tokens_before.append(
-            context.total_usage.completion_tokens
-        )
-        context.metrics.turns_between_summarizes.append(
-            context.metrics.turns_since_last_summarize
-        )
-        context.metrics.summarize_summary_lengths.append(len(summary))
-        context.metrics.summarize_total_turns_dropped += num_turns
-
-        if context.metrics.turns > 0:
-            prompt_per_turn = context.last_prompt_tokens / context.metrics.turns
-            completion_per_turn = (
-                context.total_usage.completion_tokens / context.metrics.turns
-            )
-            context.metrics.summarize_prompt_tokens_dropped.append(
-                int(prompt_per_turn * num_turns)
-            )
-            context.metrics.summarize_completion_tokens_dropped.append(
-                int(completion_per_turn * num_turns)
-            )
+        summary_chars = len(summary)
+        dropped_messages = self._dropped_message_slice(context.messages, num_turns)
+        dropped_chars = self._count_content_chars(dropped_messages)
 
         state.turn_at_last_summarize = context.metrics.turns
         start = state.dropped_turn_count
@@ -123,6 +121,14 @@ class SummarizeTool:
             content="\n\n".join(state.summaries),
             drop_turns=num_turns,
             flush_repl_state=flush_repl_state,
+            metric_events=[
+                SummarizeApplied(
+                    num_turns=num_turns,
+                    summary_chars=summary_chars,
+                    dropped_chars=dropped_chars,
+                    turns_since_last_summarize=context.metrics.turns_since_last_summarize,
+                ),
+            ],
         )
 
     @staticmethod
@@ -134,3 +140,61 @@ class SummarizeTool:
     @staticmethod
     def _as_text(value: Any) -> str:
         return value if isinstance(value, str) else str(value)
+
+    @classmethod
+    def _dropped_message_slice(
+        cls, messages: list[dict[str, Any]], num_turns: int
+    ) -> list[dict[str, Any]]:
+        start, end = summarize_drop_slice_bounds(messages, num_turns)
+        return messages[start:end]
+
+    @classmethod
+    def _count_content_chars(cls, messages: list[dict[str, Any]]) -> int:
+        return sum(cls._message_chars(message) for message in messages)
+
+    @classmethod
+    def _message_chars(cls, message: dict[str, Any]) -> int:
+        total = cls._content_chars(message.get("content"))
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            total += sum(cls._tool_call_chars(tool_call) for tool_call in tool_calls)
+        return total
+
+    @classmethod
+    def _content_chars(cls, content: Any) -> int:
+        if isinstance(content, str):
+            return len(content)
+        if isinstance(content, list):
+            return sum(cls._content_chars(item) for item in content)
+        if isinstance(content, dict):
+            total = 0
+            for field in ("text", "input_text", "output_text"):
+                value = content.get(field)
+                if isinstance(value, str):
+                    total += len(value)
+            nested_content = content.get("content")
+            if nested_content is not None:
+                total += cls._content_chars(nested_content)
+            return total
+        return 0
+
+    @classmethod
+    def _tool_call_chars(cls, tool_call: Any) -> int:
+        if isinstance(tool_call, dict):
+            function = tool_call.get("function")
+        else:
+            function = getattr(tool_call, "function", None)
+        if function is None:
+            return 0
+        if isinstance(function, dict):
+            name = function.get("name")
+            arguments = function.get("arguments")
+        else:
+            name = getattr(function, "name", None)
+            arguments = getattr(function, "arguments", None)
+        total = 0
+        if name is not None:
+            total += len(cls._as_text(name))
+        if arguments is not None:
+            total += len(cls._as_text(arguments))
+        return total

@@ -21,6 +21,7 @@ from rlm.tools import (
     get_active_tools,
     get_builtin_tool,
     get_installed_skills,
+    summarize_drop_slice_bounds,
 )
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
 
@@ -72,10 +73,7 @@ class RLMEngine:
         self._last_prompt_tokens = 0
 
         # Metrics
-        self._metrics = RLMMetrics(
-            max_turns=self.max_turns,
-            max_tokens=self.max_tokens or 0,
-        )
+        self._metrics = RLMMetrics()
 
         self._tool_state = {"summarize": SummarizeState()}
 
@@ -223,6 +221,8 @@ class RLMEngine:
                     tool.execute, tool_args, self._tool_context(messages)
                 )
             duration = time.time() - t0
+            for event in tool_result.metric_events:
+                self._metrics.record(event)
 
             result = tool_result.content
 
@@ -325,17 +325,7 @@ class RLMEngine:
 
     @staticmethod
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
-        start = 0
-        while start < len(messages) and messages[start]["role"] != "assistant":
-            start += 1
-
-        end = start
-        for _ in range(num_turns):
-            if end >= len(messages) or messages[end]["role"] != "assistant":
-                break
-            end += 1
-            while end < len(messages) and messages[end]["role"] == "tool":
-                end += 1
+        start, end = summarize_drop_slice_bounds(messages, num_turns)
         del messages[start:end]
 
     @staticmethod

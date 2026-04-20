@@ -4,13 +4,14 @@ from rlm.tools.base import BuiltinTool, ToolContext, ToolOutcome
 from rlm.tools.ipython import IPythonREPL
 from rlm.tools.registry import get_active_tools, get_builtin_tool
 from rlm.tools.skills import SKILLS_DIR, TASK_SKILLS_DIR, get_installed_skills
-from rlm.tools.summarize import SummarizeState
+from rlm.tools.summarize import SummarizeState, summarize_drop_slice_bounds
 
 __all__ = [
     "BuiltinTool",
     "IPythonREPL",
     "SKILLS_DIR",
     "SummarizeState",
+    "summarize_drop_slice_bounds",
     "TASK_SKILLS_DIR",
     "ToolContext",
     "ToolOutcome",
