@@ -153,12 +153,15 @@ class RLMEngine:
             self._total_usage.completion_tokens += usage.completion_tokens
             self._last_prompt_tokens = usage.prompt_tokens
 
-            # Record per-turn token counts
-            # TODO: verify tool_result token accounting with a self-hosted model + vLLM,
-            # where we can inspect the tokenizer directly (OpenAI encodes tool schemas as
-            # TypeScript internally, making tiktoken-based reconstruction imprecise).
-            self._metrics.prompt_tokens_per_turn.append(usage.prompt_tokens)
-            self._metrics.completion_tokens_per_turn.append(usage.completion_tokens)
+            # Record root usage and assistant-visible context for this turn.
+            self._metrics.note_root_usage(
+                self._total_usage.prompt_tokens,
+                self._total_usage.completion_tokens,
+            )
+            self._metrics.note_assistant_turn(
+                usage.prompt_tokens,
+                usage.completion_tokens,
+            )
 
             # Update metrics
             self._metrics.turns = turn + 1
@@ -166,8 +169,6 @@ class RLMEngine:
             self._metrics.turns_since_last_summarize = (
                 turn + 1
             ) - summarize_state.turn_at_last_summarize
-            self._metrics.prompt_tokens = self._total_usage.prompt_tokens
-            self._metrics.completion_tokens = self._total_usage.completion_tokens
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
