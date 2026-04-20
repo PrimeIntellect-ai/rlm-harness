@@ -70,8 +70,6 @@ class RLMMetrics:
     _summarize_summary_chars_total: int = field(default=0, repr=False)
 
     # Public work/cost token metrics
-    input_tokens: int = 0
-    output_tokens: int = 0
     sub_rlm_input_tokens: int = 0
     sub_rlm_output_tokens: int = 0
 
@@ -177,8 +175,9 @@ class RLMMetrics:
         self._refresh_derived_metrics()
         return {
             "session_count": 1 + self._sub_rlm_count,
-            "input_tokens_total": self.input_tokens,
-            "output_tokens_total": self.output_tokens,
+            "input_tokens_total": self._root_input_tokens + self.sub_rlm_input_tokens,
+            "output_tokens_total": self._root_output_tokens
+            + self.sub_rlm_output_tokens,
             "final_input_tokens_total": self.final_input_tokens
             + self._sub_rlm_final_input_tokens,
             "final_output_tokens_total": self.final_output_tokens
@@ -222,9 +221,6 @@ class RLMMetrics:
         self._refresh_derived_metrics()
 
     def _refresh_derived_metrics(self) -> None:
-        self.input_tokens = self._root_input_tokens + self.sub_rlm_input_tokens
-        self.output_tokens = self._root_output_tokens + self.sub_rlm_output_tokens
-
         if self._ipython_call_count:
             self.ipython_input_chars_mean = (
                 self._ipython_input_chars_total / self._ipython_call_count
