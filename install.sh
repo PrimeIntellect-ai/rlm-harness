@@ -24,7 +24,7 @@ command -v rg >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq 
 RLM_REPO_URL="${RLM_REPO_URL:-github.com/PrimeIntellect-ai/rlm.git}"
 RLM_REPO_BRANCH="${RLM_REPO_BRANCH:-main}"
 RLM_CHECKOUT="${RLM_CHECKOUT_PATH:-/tmp/rlm-checkout}"
-if ! git -C "$RLM_CHECKOUT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ ! -f "$RLM_CHECKOUT/install.sh" ] || [ ! -f "$RLM_CHECKOUT/pyproject.toml" ]; then
     case "$RLM_REPO_URL" in
         https://*|http://*)
             CLONE_URL="$RLM_REPO_URL"
