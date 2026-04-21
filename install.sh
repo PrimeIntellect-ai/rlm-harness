@@ -52,4 +52,14 @@ if [ -d /task/rlm-skills ]; then
         SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
     done
 fi
-uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS
+
+# Forward caller-supplied `uv tool install` extras (e.g. "--with numpy
+# --with sympy") when set, so environments can inject extra pip deps into
+# the rlm tool venv without patching this script. Tokens are word-split by
+# the shell, so avoid shell metacharacters (e.g. `>=`) inside package specs.
+EXTRA_UV_ARGS=""
+if [ -n "${RLM_EXTRA_UV_ARGS:-}" ]; then
+    EXTRA_UV_ARGS="$RLM_EXTRA_UV_ARGS"
+fi
+
+uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS $EXTRA_UV_ARGS
