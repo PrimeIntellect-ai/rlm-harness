@@ -54,6 +54,11 @@ def get_active_builtin_tools() -> list[BuiltinTool]:
     return [_TOOLS_BY_NAME[name] for name in _active_tool_names()]
 
 
+def is_tool_active(name: str) -> bool:
+    """Return whether ``name`` is in the active builtin-tool set."""
+    return name in _active_tool_names()
+
+
 def get_active_tools() -> list[dict]:
     """Return OpenAI tool schemas for active builtins."""
     return [tool.schema() for tool in get_active_builtin_tools()]

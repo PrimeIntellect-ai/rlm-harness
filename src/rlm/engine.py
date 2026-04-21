@@ -142,15 +142,19 @@ class RLMEngine:
             cwd=self.cwd,
         )
 
-        # Start IPython kernel
-        self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
-        self._repl.start()
+        # Start IPython kernel only when the ipython tool is active —
+        # otherwise the model can't see or dispatch it, so the kernel
+        # startup (subprocess + injection) is pure waste.
+        if any(tool.name == "ipython" for tool in get_active_builtin_tools()):
+            self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
+            self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
         try:
             return await self._run_loop(prompt)
         finally:
-            self._repl.shutdown()
+            if self._repl is not None:
+                self._repl.shutdown()
 
     async def _run_loop(self, prompt: str) -> RLMResult:
         active_builtin_tools = get_active_builtin_tools()
@@ -279,7 +283,7 @@ class RLMEngine:
 
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
-            if tool_result.flush_repl_state:
+            if tool_result.flush_repl_state and self._repl is not None:
                 result += "\n[repl state flushed]"
             if tool_name == "ipython" and self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
@@ -302,7 +306,7 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if tool_result.drop_turns > 0:
                 self._drop_turns(messages, tool_result.drop_turns)
-            if tool_result.flush_repl_state:
+            if tool_result.flush_repl_state and self._repl is not None:
                 self._repl.restart_kernel()
 
             if self.max_turns_in_context is not None:
