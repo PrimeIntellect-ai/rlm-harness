@@ -264,7 +264,6 @@ class RLMEngine:
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
             tool_args = parsed_args[0]
-            assert tool_args is not None
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
