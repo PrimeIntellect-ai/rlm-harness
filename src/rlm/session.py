@@ -64,53 +64,6 @@ class Session:
     def log_sub_spawn(self, child_name: str, command: str):
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
 
-    def aggregate_child_metrics(self) -> dict[str, int]:
-        """Read all sub-*/meta.json and aggregate recursive session totals."""
-        totals = {
-            "session_count": 0,
-            "input_tokens_total": 0,
-            "output_tokens_total": 0,
-            "final_input_tokens_total": 0,
-            "final_output_tokens_total": 0,
-            "branch_count": 0,
-            "branch_input_tokens_sum": 0,
-            "branch_input_tokens_max": 0,
-            "branch_output_tokens_sum": 0,
-            "branch_output_tokens_max": 0,
-        }
-
-        for child_dir in self.dir.glob("sub-*"):
-            meta_path = child_dir / "meta.json"
-            if meta_path.exists():
-                with open(meta_path) as f:
-                    meta = json.load(f)
-                stats = meta.get("context_token_stats")
-                if not isinstance(stats, dict):
-                    raise RuntimeError(
-                        f"Missing context_token_stats in child session meta: {meta_path}"
-                    )
-                for key in (
-                    "session_count",
-                    "input_tokens_total",
-                    "output_tokens_total",
-                    "final_input_tokens_total",
-                    "final_output_tokens_total",
-                    "branch_count",
-                    "branch_input_tokens_sum",
-                    "branch_output_tokens_sum",
-                ):
-                    totals[key] += int(stats.get(key, 0))
-                totals["branch_input_tokens_max"] = max(
-                    totals["branch_input_tokens_max"],
-                    int(stats.get("branch_input_tokens_max", 0)),
-                )
-                totals["branch_output_tokens_max"] = max(
-                    totals["branch_output_tokens_max"],
-                    int(stats.get("branch_output_tokens_max", 0)),
-                )
-
-        return totals
-
     def finalize(
         self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
     ):
@@ -121,23 +74,26 @@ class Session:
             entry["turns"] = turns
         self.log(entry)
 
-        # Aggregate child sub-RLM metrics
-        if metrics is not None:
-            metrics.finalize_current_branch()
-            metrics.apply_child_aggregates(self.aggregate_child_metrics())
-
         meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
         if usage:
             meta_update["usage"] = usage
         if metrics is not None:
             aggregator = SessionMetricsAggregator(self.dir)
             direct_tool_stats = aggregator.direct_programmatic_tool_call_stats()
-            child_tool_stats = aggregator.aggregate_child_programmatic_tool_call_stats()
+            child_agg = aggregator.aggregate_child_metrics()
+
+            metrics.finalize_current_branch()
+            metrics.apply_child_aggregates(child_agg.context_token_stats)
+
             metrics.programmatic_tool_calls_python = direct_tool_stats.python_total
             metrics.programmatic_tool_calls_bash = direct_tool_stats.bash_total
-            metrics.sub_rlm_programmatic_tool_calls_python = child_tool_stats.python_total
-            metrics.sub_rlm_programmatic_tool_calls_bash = child_tool_stats.bash_total
-            merged_tool_stats = direct_tool_stats.merge(child_tool_stats)
+            metrics.sub_rlm_programmatic_tool_calls_python = (
+                child_agg.tool_call_stats.python_total
+            )
+            metrics.sub_rlm_programmatic_tool_calls_bash = (
+                child_agg.tool_call_stats.bash_total
+            )
+            merged_tool_stats = direct_tool_stats.merge(child_agg.tool_call_stats)
 
             meta_update["metrics"] = metrics.to_dict()
             meta_update["context_token_stats"] = metrics.context_token_stats()

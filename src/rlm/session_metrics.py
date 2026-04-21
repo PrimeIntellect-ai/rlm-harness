@@ -80,12 +80,52 @@ class ProgrammaticToolCallStats:
         return asdict(self)
 
 
-class SessionMetricsAggregator:
-    """Aggregate programmatic-tool-call stats from session-local logs and children.
+def _empty_context_token_stats() -> dict[str, int]:
+    return {
+        "session_count": 0,
+        "input_tokens_total": 0,
+        "output_tokens_total": 0,
+        "final_input_tokens_total": 0,
+        "final_output_tokens_total": 0,
+        "branch_count": 0,
+        "branch_input_tokens_sum": 0,
+        "branch_input_tokens_max": 0,
+        "branch_output_tokens_sum": 0,
+        "branch_output_tokens_max": 0,
+    }
 
-    Token/branch aggregation lives in ``Session.aggregate_child_metrics`` and
-    ``RLMMetrics``; this aggregator only handles tool-call counts.
+
+@dataclass
+class ChildSessionAggregate:
+    """Aggregated stats across all recursive descendants of a session."""
+
+    context_token_stats: dict[str, int] = field(
+        default_factory=_empty_context_token_stats
+    )
+    tool_call_stats: ProgrammaticToolCallStats = field(
+        default_factory=ProgrammaticToolCallStats
+    )
+
+
+class SessionMetricsAggregator:
+    """Aggregate session-scoped metrics from local logs and recursive children.
+
+    All session-scoped aggregation (context-token stats, programmatic
+    tool-call stats) goes through here, so ``Session`` stays a pure
+    file/log container.
     """
+
+    _SUM_KEYS = (
+        "session_count",
+        "input_tokens_total",
+        "output_tokens_total",
+        "final_input_tokens_total",
+        "final_output_tokens_total",
+        "branch_count",
+        "branch_input_tokens_sum",
+        "branch_output_tokens_sum",
+    )
+    _MAX_KEYS = ("branch_input_tokens_max", "branch_output_tokens_max")
 
     def __init__(self, session_dir: Path):
         self.session_dir = Path(session_dir)
@@ -95,8 +135,10 @@ class SessionMetricsAggregator:
             self.session_dir / "programmatic_tool_calls.jsonl"
         )
 
-    def aggregate_child_programmatic_tool_call_stats(self) -> ProgrammaticToolCallStats:
-        aggregate = ProgrammaticToolCallStats()
+    def aggregate_child_metrics(self) -> ChildSessionAggregate:
+        """Single pass over ``sub-*/meta.json``; collects both stat bundles."""
+        aggregate = ChildSessionAggregate()
+
         for child_dir in self.session_dir.glob("sub-*"):
             meta_path = child_dir / "meta.json"
             try:
@@ -104,5 +146,22 @@ class SessionMetricsAggregator:
                     meta = json.load(f)
             except FileNotFoundError:
                 continue
-            aggregate = aggregate.merge(ProgrammaticToolCallStats.from_meta(meta))
+
+            ctx_stats = meta.get("context_token_stats")
+            if not isinstance(ctx_stats, dict):
+                raise RuntimeError(
+                    f"Missing context_token_stats in child session meta: {meta_path}"
+                )
+            for key in self._SUM_KEYS:
+                aggregate.context_token_stats[key] += int(ctx_stats.get(key, 0))
+            for key in self._MAX_KEYS:
+                aggregate.context_token_stats[key] = max(
+                    aggregate.context_token_stats[key],
+                    int(ctx_stats.get(key, 0)),
+                )
+
+            aggregate.tool_call_stats = aggregate.tool_call_stats.merge(
+                ProgrammaticToolCallStats.from_meta(meta)
+            )
+
         return aggregate
