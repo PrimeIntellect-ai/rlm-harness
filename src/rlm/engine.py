@@ -370,6 +370,7 @@ class RLMEngine:
             exec_timeout=self.exec_timeout,
             repl=self._repl,
             state=self._tool_state,
+            cwd=self.cwd,
         )
 
     @staticmethod

@@ -29,6 +29,7 @@ class ToolContext:
     exec_timeout: int
     repl: Any | None = None
     state: dict[str, Any] = field(default_factory=dict)
+    cwd: str = ""
 
 
 class BuiltinTool(Protocol):

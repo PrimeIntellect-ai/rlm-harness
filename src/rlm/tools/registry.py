@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 
 from rlm.tools.base import BuiltinTool
+from rlm.tools.bash import BashTool
 from rlm.tools.ipython import IpythonTool
 from rlm.tools.summarize import SummarizeTool
 
 
-_BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (IpythonTool(), SummarizeTool())
+_BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (IpythonTool(), SummarizeTool(), BashTool())
 _TOOLS_BY_NAME: dict[str, BuiltinTool] = {tool.name: tool for tool in _BUILTIN_TOOLS}
 
 
