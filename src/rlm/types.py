@@ -81,14 +81,14 @@ class RLMMetrics:
     sub_rlm_prompt_tokens: int = 0
     sub_rlm_completion_tokens: int = 0
     sub_rlm_count: int = 0
+
+    # Programmatic tool calls (skill CLIs invoked from inside the ipython REPL).
+    # Split own-session vs. recursive descendants, matching the sub_rlm_* token
+    # pattern above. Consumers sum the pair if they want the total.
     programmatic_tool_calls_python: int = 0
     programmatic_tool_calls_bash: int = 0
-
-    # Internal programmatic-tool counters
-    _root_programmatic_tool_calls_python: int = field(default=0, repr=False)
-    _root_programmatic_tool_calls_bash: int = field(default=0, repr=False)
-    _sub_rlm_programmatic_tool_calls_python: int = field(default=0, repr=False)
-    _sub_rlm_programmatic_tool_calls_bash: int = field(default=0, repr=False)
+    sub_rlm_programmatic_tool_calls_python: int = 0
+    sub_rlm_programmatic_tool_calls_bash: int = 0
 
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
@@ -139,28 +139,6 @@ class RLMMetrics:
             self.summarize_summary_chars_mean = (
                 self._summarize_summary_chars_total / self._summarize_applied_count
             )
-
-        self.programmatic_tool_calls_python = (
-            self._root_programmatic_tool_calls_python
-            + self._sub_rlm_programmatic_tool_calls_python
-        )
-        self.programmatic_tool_calls_bash = (
-            self._root_programmatic_tool_calls_bash
-            + self._sub_rlm_programmatic_tool_calls_bash
-        )
-
-    def apply_programmatic_tool_call_counts(
-        self,
-        direct_python: int,
-        direct_bash: int,
-        child_python: int,
-        child_bash: int,
-    ) -> None:
-        self._root_programmatic_tool_calls_python = direct_python
-        self._root_programmatic_tool_calls_bash = direct_bash
-        self._sub_rlm_programmatic_tool_calls_python = child_python
-        self._sub_rlm_programmatic_tool_calls_bash = child_bash
-        self._refresh_derived_metrics()
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()

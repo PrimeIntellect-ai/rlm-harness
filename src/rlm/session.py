@@ -82,11 +82,13 @@ class Session:
             metrics.sub_rlm_prompt_tokens = child_metrics.prompt_tokens
             metrics.sub_rlm_completion_tokens = child_metrics.completion_tokens
             metrics.sub_rlm_count = child_metrics.count
-            metrics.apply_programmatic_tool_call_counts(
-                direct_tool_stats.python_total,
-                direct_tool_stats.bash_total,
-                child_metrics.tool_call_stats.python_total,
-                child_metrics.tool_call_stats.bash_total,
+            metrics.programmatic_tool_calls_python = direct_tool_stats.python_total
+            metrics.programmatic_tool_calls_bash = direct_tool_stats.bash_total
+            metrics.sub_rlm_programmatic_tool_calls_python = (
+                child_metrics.tool_call_stats.python_total
+            )
+            metrics.sub_rlm_programmatic_tool_calls_bash = (
+                child_metrics.tool_call_stats.bash_total
             )
             merged_tool_stats = direct_tool_stats.merge(child_metrics.tool_call_stats)
 
