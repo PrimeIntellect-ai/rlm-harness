@@ -230,6 +230,19 @@ class RLMEngine:
                 )
                 break
 
+            # Malformed tool-call arguments: fail the rollout so training
+            # penalises the mistake. Final_text + stop_reason make the failure
+            # visible to the verifiers harness without raising an exception.
+            if msg.tool_calls and parsed_args[0] is None:
+                tool_name = msg.tool_calls[0].function.name
+                err_info = tool_calls_log[0]["args"]
+                self._metrics.stop_reason = "invalid_tool_args"
+                final_text = (
+                    f"[invalid JSON arguments for tool '{tool_name}': "
+                    f"{err_info['_parse_error']}]"
+                )
+                break
+
             # Token budget check
             if (
                 self.max_tokens
@@ -245,26 +258,21 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call (reuse parsed args from above)
+            # Execute the single allowed tool call (reuse parsed args from above;
+            # parse failures have already broken the loop, so parsed_args[0] is
+            # guaranteed to be a dict here).
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
             tool_args = parsed_args[0]
+            assert tool_args is not None
             t0 = time.time()
-            if tool_args is None:
-                err_info = tool_calls_log[0]["args"]
-                tool_result = ToolOutcome(
-                    content=f"Error: invalid JSON arguments for tool '{tool_name}': {err_info['_parse_error']}"
-                )
+            tool = get_builtin_tool(tool_name)
+            if tool is None:
+                tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
             else:
-                tool = get_builtin_tool(tool_name)
-                if tool is None:
-                    tool_result = ToolOutcome(
-                        content=f"Error: unknown tool '{tool_name}'"
-                    )
-                else:
-                    tool_result = await asyncio.to_thread(
-                        tool.execute, tool_args, self._tool_context(messages)
-                    )
+                tool_result = await asyncio.to_thread(
+                    tool.execute, tool_args, self._tool_context(messages)
+                )
             duration = time.time() - t0
             for event in tool_result.metric_events:
                 self._metrics.record(event)
