@@ -204,7 +204,10 @@ class RLMEngine:
                     args, err = _parse_tool_call_args(tc.function.arguments)
                     parsed_args.append(args)
                     tool_calls_log.append(
-                        {"name": tc.function.name, "args": err if args is None else args}
+                        {
+                            "name": tc.function.name,
+                            "args": err if args is None else args,
+                        }
                     )
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
