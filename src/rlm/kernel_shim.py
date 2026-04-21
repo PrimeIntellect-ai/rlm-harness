@@ -60,8 +60,11 @@ def _make_run(cli_name: str):
                     cmd.append(flag)
             else:
                 cmd.extend([flag, str(value)])
+        env = os.environ.copy()
+        env["RLM_TOOL_CALL_SOURCE"] = "python"
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
