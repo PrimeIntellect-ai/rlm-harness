@@ -68,6 +68,14 @@ class IpythonTool:
         )
         return schema
 
+    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
+        return [
+            "You have a persistent IPython session. Variables, imports, and function definitions persist across calls.",
+            "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",
+            "Use !python3 to run code with the project's own packages (e.g. !python3 -m pytest, !python3 -c 'import numpy').",
+            "Use %%bash for multi-line shell scripts.",
+        ]
+
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         code = args.get("code", "")
         if not isinstance(code, str):

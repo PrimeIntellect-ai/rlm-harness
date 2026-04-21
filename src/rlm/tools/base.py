@@ -41,3 +41,11 @@ class BuiltinTool(Protocol):
 
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         """Execute the tool and return a string tool result plus side effects."""
+
+    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
+        """Return the lines this tool contributes to the system prompt.
+
+        May return an empty list when the tool has nothing to describe given
+        the current configuration (e.g. summarize only adds a line when a
+        context-turn limit is in effect).
+        """

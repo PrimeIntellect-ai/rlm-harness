@@ -15,11 +15,12 @@ from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
     SKILLS_DIR,
+    BuiltinTool,
     IPythonREPL,
     SummarizeState,
     ToolContext,
     ToolOutcome,
-    get_active_tools,
+    get_active_builtin_tools,
     get_builtin_tool,
     get_installed_skills,
     summarize_drop_slice_bounds,
@@ -152,12 +153,10 @@ class RLMEngine:
             self._repl.shutdown()
 
     async def _run_loop(self, prompt: str) -> RLMResult:
-        active_tools = get_active_tools()
-        summarize_enabled = any(
-            tool["function"]["name"] == "summarize" for tool in active_tools
-        )
+        active_builtin_tools = get_active_builtin_tools()
+        active_tools = [tool.schema() for tool in active_builtin_tools]
         messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = self._load_system_prompt(messages_path, summarize_enabled)
+        system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -334,7 +333,9 @@ class RLMEngine:
         )
         return result
 
-    def _load_system_prompt(self, messages_path: str, summarize_enabled: bool) -> str:
+    def _load_system_prompt(
+        self, messages_path: str, active_tools: list[BuiltinTool]
+    ) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
         system_prompt = build_system_prompt(
@@ -344,7 +345,7 @@ class RLMEngine:
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             max_turns_in_context=self.max_turns_in_context,
-            summarize_enabled=summarize_enabled,
+            active_tools=active_tools,
         )
         if self.append_to_system_prompt:
             system_prompt += "\n\n" + self.append_to_system_prompt

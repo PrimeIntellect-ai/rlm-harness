@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from rlm.tools.base import BuiltinTool
+
 
 def build_system_prompt(
     cwd: str,
@@ -11,17 +16,17 @@ def build_system_prompt(
     *,
     allow_recursion: bool,
     max_turns_in_context: int | None,
-    summarize_enabled: bool,
+    active_tools: list[BuiltinTool],
 ) -> str:
-    """Build the system prompt."""
-    parts = [
+    """Build the system prompt.
+
+    Layout: role → work instructions → environment (cwd, log path, skills) →
+    constraints (max turns) → capabilities (recursion) → tool API. Tools come
+    last so the model has already seen any constraints that motivate them
+    (e.g. summarize makes sense only once the turns-in-context limit is known).
+    """
+    parts: list[str] = [
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating.",
-        "Call at most one built-in tool per turn.",
-        "",
-        "You have a persistent IPython session. Variables, imports, and function definitions persist across calls.",
-        "Use !command for shell commands (e.g. !git status, !ls -la, !pip install foo).",
-        "Use !python3 to run code with the project's own packages (e.g. !python3 -m pytest, !python3 -c 'import numpy').",
-        "Use %%bash for multi-line shell scripts.",
         "",
         "Work one step at a time: execute code, read the output, then decide your next step.",
         "When you are done, stop calling tools and state your final answer.",
@@ -47,26 +52,30 @@ def build_system_prompt(
             "Discover its CLI usage with `<skill> --help`."
         )
     if skill_lines:
-        parts[10:10] = [*skill_lines, ""]
+        parts.extend(["", *skill_lines])
 
     if max_turns_in_context is not None:
         parts.extend(
             [
                 "",
-                "The current context may contain at most "
-                f"{max_turns_in_context} assistant turns.",
+                f"The current context may contain at most {max_turns_in_context} assistant turns.",
             ]
         )
-        if summarize_enabled:
-            parts.append(
-                "Use `summarize` to drop older turns and stay within this limit."
-            )
 
     if allow_recursion:
-        parts[6:6] = [
-            "The `rlm` module is pre-imported. Call `await rlm.run('sub-task')` to spawn a recursive sub-agent.",
-            "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm.run('task1'), rlm.run('task2'))`.",
-            "",
-        ]
+        parts.extend(
+            [
+                "",
+                "The `rlm` module is pre-imported. Call `await rlm.run('sub-task')` to spawn a recursive sub-agent.",
+                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm.run('task1'), rlm.run('task2'))`.",
+            ]
+        )
+
+    if active_tools:
+        parts.extend(["", "Call at most one built-in tool per turn."])
+        for tool in active_tools:
+            tool_lines = tool.prompt_lines(max_turns_in_context=max_turns_in_context)
+            if tool_lines:
+                parts.extend(["", *tool_lines])
 
     return "\n".join(parts)
