@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from rlm.session_metrics import SessionMetricsAggregator
+from rlm.types import ChildSessionAggregate, ProgrammaticToolCallStats
 
 
 class Session:
@@ -64,6 +64,24 @@ class Session:
     def log_sub_spawn(self, child_name: str, command: str):
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
 
+    def aggregate_child_metrics(self) -> ChildSessionAggregate:
+        """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
+        aggregate = ChildSessionAggregate()
+        for child_dir in self.dir.glob("sub-*"):
+            meta_path = child_dir / "meta.json"
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+            except FileNotFoundError:
+                continue
+            ctx_stats = meta.get("context_token_stats")
+            if not isinstance(ctx_stats, dict):
+                raise RuntimeError(
+                    f"Missing context_token_stats in child session meta: {meta_path}"
+                )
+            aggregate.absorb(ctx_stats, ProgrammaticToolCallStats.from_meta(meta))
+        return aggregate
+
     def finalize(
         self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
     ):
@@ -78,26 +96,22 @@ class Session:
         if usage:
             meta_update["usage"] = usage
         if metrics is not None:
-            aggregator = SessionMetricsAggregator(self.dir)
-            direct_tool_stats = aggregator.direct_programmatic_tool_call_stats()
-            child_agg = aggregator.aggregate_child_metrics()
+            direct_tool_stats = ProgrammaticToolCallStats.from_log(
+                self.dir / "programmatic_tool_calls.jsonl"
+            )
+            child = self.aggregate_child_metrics()
 
             metrics.finalize_current_branch()
-            metrics.apply_child_aggregates(child_agg.context_token_stats)
-
-            metrics.programmatic_tool_calls_python = direct_tool_stats.python_total
-            metrics.programmatic_tool_calls_bash = direct_tool_stats.bash_total
-            metrics.sub_rlm_programmatic_tool_calls_python = (
-                child_agg.tool_call_stats.python_total
+            metrics.apply_child_aggregates(child.context_token_stats)
+            metrics.apply_programmatic_tool_call_stats(
+                direct_tool_stats, child.tool_call_stats
             )
-            metrics.sub_rlm_programmatic_tool_calls_bash = (
-                child_agg.tool_call_stats.bash_total
-            )
-            merged_tool_stats = direct_tool_stats.merge(child_agg.tool_call_stats)
 
             meta_update["metrics"] = metrics.to_dict()
             meta_update["context_token_stats"] = metrics.context_token_stats()
-            meta_update["programmatic_tool_call_stats"] = merged_tool_stats.to_dict()
+            meta_update["programmatic_tool_call_stats"] = direct_tool_stats.merge(
+                child.tool_call_stats
+            ).to_dict()
         self.write_meta(**meta_update)
         self._msg_file.close()
 
