@@ -27,6 +27,25 @@ from rlm.tools import (
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
 
 
+def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
+    """Parse a tool-call arguments blob. Returns (args, error_info).
+
+    On success, args is the parsed dict and error_info is None.
+    On failure, args is None and error_info is a dict suitable for logging
+    (with ``_parse_error`` and ``_raw`` keys). Callers that need a string
+    error message should read ``error_info["_parse_error"]``.
+    """
+    try:
+        return json.loads(raw), None
+    except json.JSONDecodeError as exc:
+        return None, {
+            "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
+            "_raw": raw,
+        }
+    except TypeError as exc:
+        return None, {"_parse_error": str(exc), "_raw": raw}
+
+
 class RLMEngine:
     def __init__(
         self,
@@ -175,24 +194,17 @@ class RLMEngine:
             msg_dict.setdefault("content", "")
             messages.append(msg_dict)
 
-            # Log assistant message
-            tool_calls_log = None
+            # Log assistant message; parse tool-call args once, reuse below.
+            tool_calls_log: list[dict] | None = None
+            parsed_args: list[dict | None] = []
             if msg.tool_calls:
                 tool_calls_log = []
                 for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError as exc:
-                        args = {
-                            "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
-                            "_raw": tc.function.arguments,
-                        }
-                    except TypeError as exc:
-                        args = {
-                            "_parse_error": str(exc),
-                            "_raw": tc.function.arguments,
-                        }
-                    tool_calls_log.append({"name": tc.function.name, "args": args})
+                    args, err = _parse_tool_call_args(tc.function.arguments)
+                    parsed_args.append(args)
+                    tool_calls_log.append(
+                        {"name": tc.function.name, "args": err if args is None else args}
+                    )
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
@@ -217,24 +229,15 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call
+            # Execute the single allowed tool call (reuse parsed args from above)
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
+            tool_args = parsed_args[0]
             t0 = time.time()
-            try:
-                tool_args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError as exc:
+            if tool_args is None:
+                err_info = tool_calls_log[0]["args"]
                 tool_result = ToolOutcome(
-                    content=(
-                        f"Error: invalid JSON arguments for tool '{tool_name}': "
-                        f"{exc.msg} at line {exc.lineno} column {exc.colno}"
-                    )
-                )
-            except TypeError as exc:
-                tool_result = ToolOutcome(
-                    content=(
-                        f"Error: invalid JSON arguments for tool '{tool_name}': {exc}"
-                    )
+                    content=f"Error: invalid JSON arguments for tool '{tool_name}': {err_info['_parse_error']}"
                 )
             else:
                 tool = get_builtin_tool(tool_name)

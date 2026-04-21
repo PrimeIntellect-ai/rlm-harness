@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -16,50 +17,46 @@ class ProgrammaticToolCallStats:
 
     @classmethod
     def from_log(cls, log_path: Path) -> ProgrammaticToolCallStats:
-        """Count programmatic tool calls from a session-local JSONL log."""
+        """Count programmatic tool calls from a session-local JSONL log.
+
+        Untrusted input (written by child processes that may exit mid-line),
+        so malformed entries are skipped.
+        """
         stats = cls()
-        if not log_path.exists():
+        try:
+            f = open(log_path)
+        except FileNotFoundError:
             return stats
+        with f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                tool = entry.get("tool")
+                source = entry.get("source")
+                if not isinstance(tool, str) or source not in {"python", "bash"}:
+                    continue
 
-        for line in log_path.read_text().splitlines():
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            tool = entry.get("tool")
-            source = entry.get("source")
-            if not isinstance(tool, str) or source not in {"python", "bash"}:
-                continue
-
-            if source == "python":
-                stats.python_total += 1
-                stats.by_tool_python[tool] = stats.by_tool_python.get(tool, 0) + 1
-            else:
-                stats.bash_total += 1
-                stats.by_tool_bash[tool] = stats.by_tool_bash.get(tool, 0) + 1
+                if source == "python":
+                    stats.python_total += 1
+                    stats.by_tool_python[tool] = stats.by_tool_python.get(tool, 0) + 1
+                else:
+                    stats.bash_total += 1
+                    stats.by_tool_bash[tool] = stats.by_tool_bash.get(tool, 0) + 1
 
         return stats
 
     @classmethod
     def from_meta(cls, meta: dict) -> ProgrammaticToolCallStats:
-        """Load tool-call stats persisted into child session metadata."""
+        """Load tool-call stats previously persisted via ``to_dict``."""
         raw = meta.get("programmatic_tool_call_stats", {})
-        if not isinstance(raw, dict):
-            return cls()
-        stats = cls(
+        return cls(
             python_total=int(raw.get("python_total", 0)),
             bash_total=int(raw.get("bash_total", 0)),
+            by_tool_python=dict(raw.get("by_tool_python", {})),
+            by_tool_bash=dict(raw.get("by_tool_bash", {})),
         )
-        for source in ("python", "bash"):
-            by_tool = raw.get(f"by_tool_{source}", {})
-            if not isinstance(by_tool, dict):
-                continue
-            target = getattr(stats, f"by_tool_{source}")
-            for tool_name, count in by_tool.items():
-                if not isinstance(tool_name, str):
-                    continue
-                target[tool_name] = int(count)
-        return stats
 
     def merge(self, other: ProgrammaticToolCallStats) -> ProgrammaticToolCallStats:
         """Return a merged copy of this stats object and *other*."""
@@ -79,13 +76,8 @@ class ProgrammaticToolCallStats:
             )
         return merged
 
-    def to_dict(self) -> dict[str, int | dict[str, int]]:
-        return {
-            "python_total": self.python_total,
-            "bash_total": self.bash_total,
-            "by_tool_python": self.by_tool_python,
-            "by_tool_bash": self.by_tool_bash,
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass
@@ -114,10 +106,11 @@ class SessionMetricsAggregator:
 
         for child_dir in self.session_dir.glob("sub-*"):
             meta_path = child_dir / "meta.json"
-            if not meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+            except FileNotFoundError:
                 continue
-            with open(meta_path) as f:
-                meta = json.load(f)
             usage = meta.get("usage", {})
             metrics = meta.get("metrics", {})
 

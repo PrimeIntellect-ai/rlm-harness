@@ -74,10 +74,12 @@ class Session:
             entry["turns"] = turns
         self.log(entry)
 
-        aggregator = SessionMetricsAggregator(self.dir)
-        direct_tool_stats = aggregator.direct_programmatic_tool_call_stats()
-        merged_tool_stats = direct_tool_stats
+        meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
+        if usage:
+            meta_update["usage"] = usage
         if metrics is not None:
+            aggregator = SessionMetricsAggregator(self.dir)
+            direct_tool_stats = aggregator.direct_programmatic_tool_call_stats()
             child_metrics = aggregator.aggregate_child_metrics()
             metrics.sub_rlm_prompt_tokens = child_metrics.prompt_tokens
             metrics.sub_rlm_completion_tokens = child_metrics.completion_tokens
@@ -91,11 +93,6 @@ class Session:
                 child_metrics.tool_call_stats.bash_total
             )
             merged_tool_stats = direct_tool_stats.merge(child_metrics.tool_call_stats)
-
-        meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
-        if usage:
-            meta_update["usage"] = usage
-        if metrics is not None:
             meta_update["metrics"] = metrics.to_dict()
             meta_update["programmatic_tool_call_stats"] = merged_tool_stats.to_dict()
         self.write_meta(**meta_update)

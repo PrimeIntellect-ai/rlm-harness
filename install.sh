@@ -91,17 +91,9 @@ REAL_TOOL="$real_path"
 TOOL_NAME="$tool_name"
 SOURCE="\${RLM_TOOL_CALL_SOURCE:-bash}"
 if [ -n "\${RLM_SESSION_DIR:-}" ]; then
-  python3 - "\${RLM_SESSION_DIR}/programmatic_tool_calls.jsonl" "\$TOOL_NAME" "\$SOURCE" <<'PY' >/dev/null 2>&1 || true
-import json
-import os
-import sys
-import time
-
-path, tool, source = sys.argv[1:4]
-os.makedirs(os.path.dirname(path), exist_ok=True)
-with open(path, "a", encoding="utf-8") as f:
-    f.write(json.dumps({"tool": tool, "source": source, "timestamp": time.time()}) + "\\n")
-PY
+  printf '{"tool":"%s","source":"%s","timestamp":%s}\n' \\
+      "\$TOOL_NAME" "\$SOURCE" "\$(date +%s.%N)" \\
+      >> "\${RLM_SESSION_DIR}/programmatic_tool_calls.jsonl" 2>/dev/null || true
 fi
 exec "\$REAL_TOOL" "\$@"
 EOF

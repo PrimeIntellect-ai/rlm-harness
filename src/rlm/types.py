@@ -82,9 +82,7 @@ class RLMMetrics:
     sub_rlm_completion_tokens: int = 0
     sub_rlm_count: int = 0
 
-    # Programmatic tool calls (skill CLIs invoked from inside the ipython REPL).
-    # Split own-session vs. recursive descendants, matching the sub_rlm_* token
-    # pattern above. Consumers sum the pair if they want the total.
+    # Skill-CLI invocations from inside the ipython REPL
     programmatic_tool_calls_python: int = 0
     programmatic_tool_calls_bash: int = 0
     sub_rlm_programmatic_tool_calls_python: int = 0
