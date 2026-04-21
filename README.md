@@ -2,11 +2,12 @@
 
 A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
-The model gets three built-in tools (opt in / out via `RLM_TOOLS`):
+The model gets four built-in tools (opt in / out via `RLM_TOOLS`):
 
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash` (on by default)
 - `summarize` for dropping old turns from context and optionally resetting REPL state (on by default)
 - `bash` for stateless shell command execution (off by default)
+- `edit` for single-occurrence string replacement in a file (off by default)
 
 Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
 
