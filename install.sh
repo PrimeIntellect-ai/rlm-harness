@@ -45,11 +45,18 @@ fi
 # /task/rlm-skills before this script runs).  Discover and install any
 # that are present so they're both importable and on PATH.
 SKILL_ARGS=""
+SKILL_TOOL_NAMES=""
 if [ -d /task/rlm-skills ]; then
     for skill_dir in /task/rlm-skills/*/; do
         [ -f "$skill_dir/pyproject.toml" ] || continue
         skill_name=$(grep '^name' "$skill_dir/pyproject.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
         SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
+        for candidate in "$skill_dir"/src/*; do
+            [ -d "$candidate" ] || continue
+            [ "$(basename "$candidate")" = "__pycache__" ] && continue
+            SKILL_TOOL_NAMES="$SKILL_TOOL_NAMES $(basename "$candidate")"
+            break
+        done
     done
 fi
 
@@ -63,3 +70,36 @@ if [ -n "${RLM_EXTRA_UV_ARGS:-}" ]; then
 fi
 
 uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS $EXTRA_UV_ARGS
+
+REAL_TOOL_DIR="$UV_TOOL_BIN_DIR/.rlm-real-tools"
+mkdir -p "$REAL_TOOL_DIR"
+
+wrap_skill_cli() {
+    local tool_name="$1"
+    local wrapper_path="$UV_TOOL_BIN_DIR/$tool_name"
+    local real_path="$REAL_TOOL_DIR/$tool_name"
+
+    if [ -x "$wrapper_path" ] && [ ! -x "$real_path" ]; then
+        mv "$wrapper_path" "$real_path"
+    fi
+    [ -x "$real_path" ] || return 0
+
+    cat > "$wrapper_path" <<EOF
+#!/usr/bin/env bash
+set -eo pipefail
+REAL_TOOL="$real_path"
+TOOL_NAME="$tool_name"
+SOURCE="\${RLM_TOOL_CALL_SOURCE:-bash}"
+if [ -n "\${RLM_SESSION_DIR:-}" ]; then
+  printf '{"tool":"%s","source":"%s","timestamp":%s}\n' \\
+      "\$TOOL_NAME" "\$SOURCE" "\$(date +%s.%N)" \\
+      >> "\${RLM_SESSION_DIR}/programmatic_tool_calls.jsonl" 2>/dev/null || true
+fi
+exec "\$REAL_TOOL" "\$@"
+EOF
+    chmod +x "$wrapper_path"
+}
+
+for tool_name in $SKILL_TOOL_NAMES; do
+    wrap_skill_cli "$tool_name"
+done

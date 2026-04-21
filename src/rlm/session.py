@@ -8,6 +8,8 @@ import time
 import uuid
 from pathlib import Path
 
+from rlm.types import ChildSessionAggregate, ProgrammaticToolCallStats
+
 
 class Session:
     def __init__(self, session_dir: Path | None = None):
@@ -62,34 +64,27 @@ class Session:
     def log_sub_spawn(self, child_name: str, command: str):
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
 
-    def aggregate_child_metrics(self) -> tuple[int, int, int]:
-        """Read all sub-*/meta.json and sum their token usage.
-
-        Returns (sub_prompt_tokens, sub_completion_tokens, sub_count).
-        """
-        sub_prompt = 0
-        sub_completion = 0
-        sub_count = 0
-
+    def aggregate_child_metrics(self) -> ChildSessionAggregate:
+        """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
+        aggregate = ChildSessionAggregate()
         for child_dir in self.dir.glob("sub-*"):
             meta_path = child_dir / "meta.json"
-            if meta_path.exists():
+            try:
                 with open(meta_path) as f:
                     meta = json.load(f)
-                usage = meta.get("usage", {})
-                metrics = meta.get("metrics", {})
-
-                # This child's direct usage
-                sub_prompt += usage.get("prompt_tokens", 0)
-                sub_completion += usage.get("completion_tokens", 0)
-                sub_count += 1
-
-                # Plus its children's usage (recursive aggregation)
-                sub_prompt += metrics.get("sub_rlm_prompt_tokens", 0)
-                sub_completion += metrics.get("sub_rlm_completion_tokens", 0)
-                sub_count += metrics.get("sub_rlm_count", 0)
-
-        return sub_prompt, sub_completion, sub_count
+            except FileNotFoundError:
+                continue
+            # Missing context_token_stats means the child crashed before
+            # finalize; silently treat as zero contribution so child failures
+            # don't cascade to parent (and grandparent, etc.). Still raise on
+            # genuinely malformed data (corruption rather than absence).
+            ctx_stats = meta.get("context_token_stats", {})
+            if not isinstance(ctx_stats, dict):
+                raise RuntimeError(
+                    f"Malformed context_token_stats in child session meta: {meta_path}"
+                )
+            aggregate.absorb(ctx_stats, ProgrammaticToolCallStats.from_meta(meta))
+        return aggregate
 
     def finalize(
         self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
@@ -101,18 +96,26 @@ class Session:
             entry["turns"] = turns
         self.log(entry)
 
-        # Aggregate child sub-RLM metrics
-        if metrics is not None:
-            sub_prompt, sub_completion, sub_count = self.aggregate_child_metrics()
-            metrics.sub_rlm_prompt_tokens = sub_prompt
-            metrics.sub_rlm_completion_tokens = sub_completion
-            metrics.sub_rlm_count = sub_count
-
         meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
         if usage:
             meta_update["usage"] = usage
         if metrics is not None:
+            direct_tool_stats = ProgrammaticToolCallStats.from_log(
+                self.dir / "programmatic_tool_calls.jsonl"
+            )
+            child = self.aggregate_child_metrics()
+
+            metrics.finalize_current_branch()
+            metrics.apply_child_aggregates(child.context_token_stats)
+            metrics.apply_programmatic_tool_call_stats(
+                direct_tool_stats, child.tool_call_stats
+            )
+
             meta_update["metrics"] = metrics.to_dict()
+            meta_update["context_token_stats"] = metrics.context_token_stats()
+            meta_update["programmatic_tool_call_stats"] = direct_tool_stats.merge(
+                child.tool_call_stats
+            ).to_dict()
         self.write_meta(**meta_update)
         self._msg_file.close()
 

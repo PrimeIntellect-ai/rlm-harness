@@ -18,12 +18,44 @@ from rlm.tools import (
     IPythonREPL,
     SummarizeState,
     ToolContext,
+    ToolOutcome,
     get_active_tools,
     get_builtin_tool,
     get_installed_skills,
     summarize_drop_slice_bounds,
 )
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
+
+
+def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
+    """Parse a tool-call arguments blob. Returns (args, error_info).
+
+    On success, args is the parsed dict and error_info is None.
+    On failure (invalid JSON, wrong type, or non-object JSON like ``null`` /
+    ``42`` / ``"foo"`` / ``[]``), args is None and error_info is a dict
+    suitable for logging (with ``_parse_error`` and ``_raw`` keys). Callers
+    that need a string error message should read ``error_info["_parse_error"]``.
+
+    Tool schemas require objects, so anything that parses to a non-dict is
+    treated as an error — otherwise ``args is None`` would be ambiguous
+    (parse failure vs. JSON ``null``) and non-dict values would silently
+    reach ``tool.execute`` and crash there with a less useful message.
+    """
+    try:
+        args = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, {
+            "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
+            "_raw": raw,
+        }
+    except TypeError as exc:
+        return None, {"_parse_error": str(exc), "_raw": raw}
+    if not isinstance(args, dict):
+        return None, {
+            "_parse_error": f"expected JSON object, got {type(args).__name__}",
+            "_raw": raw,
+        }
+    return args, None
 
 
 class RLMEngine:
@@ -153,12 +185,15 @@ class RLMEngine:
             self._total_usage.completion_tokens += usage.completion_tokens
             self._last_prompt_tokens = usage.prompt_tokens
 
-            # Record per-turn token counts
-            # TODO: verify tool_result token accounting with a self-hosted model + vLLM,
-            # where we can inspect the tokenizer directly (OpenAI encodes tool schemas as
-            # TypeScript internally, making tiktoken-based reconstruction imprecise).
-            self._metrics.prompt_tokens_per_turn.append(usage.prompt_tokens)
-            self._metrics.completion_tokens_per_turn.append(usage.completion_tokens)
+            # Record root usage and assistant-visible context for this turn.
+            self._metrics.note_root_usage(
+                self._total_usage.prompt_tokens,
+                self._total_usage.completion_tokens,
+            )
+            self._metrics.note_assistant_turn(
+                usage.prompt_tokens,
+                usage.completion_tokens,
+            )
 
             # Update metrics
             self._metrics.turns = turn + 1
@@ -166,30 +201,45 @@ class RLMEngine:
             self._metrics.turns_since_last_summarize = (
                 turn + 1
             ) - summarize_state.turn_at_last_summarize
-            self._metrics.prompt_tokens = self._total_usage.prompt_tokens
-            self._metrics.completion_tokens = self._total_usage.completion_tokens
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
             msg_dict.setdefault("content", "")
             messages.append(msg_dict)
 
-            # Log assistant message
-            tool_calls_log = None
+            # Log assistant message; parse tool-call args once, reuse below.
+            tool_calls_log: list[dict] | None = None
+            parsed_args: list[dict | None] = []
             if msg.tool_calls:
-                tool_calls_log = [
-                    {
-                        "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments),
-                    }
-                    for tc in msg.tool_calls
-                ]
+                tool_calls_log = []
+                for tc in msg.tool_calls:
+                    args, err = _parse_tool_call_args(tc.function.arguments)
+                    parsed_args.append(args)
+                    tool_calls_log.append(
+                        {
+                            "name": tc.function.name,
+                            "args": err if args is None else args,
+                        }
+                    )
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
                 self._metrics.stop_reason = "multiple_tool_calls"
                 final_text = (
                     "[emitted multiple tool calls in one turn; at most 1 is allowed]"
+                )
+                break
+
+            # Malformed tool-call arguments: fail the rollout so training
+            # penalises the mistake. Final_text + stop_reason make the failure
+            # visible to the verifiers harness without raising an exception.
+            if msg.tool_calls and parsed_args[0] is None:
+                tool_name = msg.tool_calls[0].function.name
+                err_info = tool_calls_log[0]["args"]
+                self._metrics.stop_reason = "invalid_tool_args"
+                final_text = (
+                    f"[invalid JSON arguments for tool '{tool_name}': "
+                    f"{err_info['_parse_error']}]"
                 )
                 break
 
@@ -208,14 +258,16 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call
+            # Execute the single allowed tool call (reuse parsed args from above;
+            # parse failures have already broken the loop, so parsed_args[0] is
+            # guaranteed to be a dict here).
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
-            tool_args = json.loads(tc.function.arguments)
+            tool_args = parsed_args[0]
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
-                tool_result = self._unknown_tool_result(tool_name)
+                tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
             else:
                 tool_result = await asyncio.to_thread(
                     tool.execute, tool_args, self._tool_context(messages)
@@ -327,9 +379,3 @@ class RLMEngine:
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
         start, end = summarize_drop_slice_bounds(messages, num_turns)
         del messages[start:end]
-
-    @staticmethod
-    def _unknown_tool_result(name: str):
-        from rlm.tools.base import ToolOutcome
-
-        return ToolOutcome(content=f"Error: unknown tool '{name}'")
