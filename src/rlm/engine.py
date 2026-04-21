@@ -31,12 +31,18 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     """Parse a tool-call arguments blob. Returns (args, error_info).
 
     On success, args is the parsed dict and error_info is None.
-    On failure, args is None and error_info is a dict suitable for logging
-    (with ``_parse_error`` and ``_raw`` keys). Callers that need a string
-    error message should read ``error_info["_parse_error"]``.
+    On failure (invalid JSON, wrong type, or non-object JSON like ``null`` /
+    ``42`` / ``"foo"`` / ``[]``), args is None and error_info is a dict
+    suitable for logging (with ``_parse_error`` and ``_raw`` keys). Callers
+    that need a string error message should read ``error_info["_parse_error"]``.
+
+    Tool schemas require objects, so anything that parses to a non-dict is
+    treated as an error — otherwise ``args is None`` would be ambiguous
+    (parse failure vs. JSON ``null``) and non-dict values would silently
+    reach ``tool.execute`` and crash there with a less useful message.
     """
     try:
-        return json.loads(raw), None
+        args = json.loads(raw)
     except json.JSONDecodeError as exc:
         return None, {
             "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
@@ -44,6 +50,12 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
         }
     except TypeError as exc:
         return None, {"_parse_error": str(exc), "_raw": raw}
+    if not isinstance(args, dict):
+        return None, {
+            "_parse_error": f"expected JSON object, got {type(args).__name__}",
+            "_raw": raw,
+        }
+    return args, None
 
 
 class RLMEngine:
