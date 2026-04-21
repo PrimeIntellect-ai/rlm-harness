@@ -74,10 +74,14 @@ class Session:
                     meta = json.load(f)
             except FileNotFoundError:
                 continue
-            ctx_stats = meta.get("context_token_stats")
+            # Missing context_token_stats means the child crashed before
+            # finalize; silently treat as zero contribution so child failures
+            # don't cascade to parent (and grandparent, etc.). Still raise on
+            # genuinely malformed data (corruption rather than absence).
+            ctx_stats = meta.get("context_token_stats", {})
             if not isinstance(ctx_stats, dict):
                 raise RuntimeError(
-                    f"Missing context_token_stats in child session meta: {meta_path}"
+                    f"Malformed context_token_stats in child session meta: {meta_path}"
                 )
             aggregate.absorb(ctx_stats, ProgrammaticToolCallStats.from_meta(meta))
         return aggregate
