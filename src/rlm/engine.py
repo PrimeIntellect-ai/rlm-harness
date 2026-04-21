@@ -15,11 +15,12 @@ from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
     SKILLS_DIR,
+    BuiltinTool,
     IPythonREPL,
     SummarizeState,
     ToolContext,
     ToolOutcome,
-    get_active_tools,
+    get_active_builtin_tools,
     get_builtin_tool,
     get_installed_skills,
     summarize_drop_slice_bounds,
@@ -141,23 +142,25 @@ class RLMEngine:
             cwd=self.cwd,
         )
 
-        # Start IPython kernel
-        self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
-        self._repl.start()
+        # Start IPython kernel only when the ipython tool is active —
+        # otherwise the model can't see or dispatch it, so the kernel
+        # startup (subprocess + injection) is pure waste.
+        if any(tool.name == "ipython" for tool in get_active_builtin_tools()):
+            self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
+            self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
         try:
             return await self._run_loop(prompt)
         finally:
-            self._repl.shutdown()
+            if self._repl is not None:
+                self._repl.shutdown()
 
     async def _run_loop(self, prompt: str) -> RLMResult:
-        active_tools = get_active_tools()
-        summarize_enabled = any(
-            tool["function"]["name"] == "summarize" for tool in active_tools
-        )
+        active_builtin_tools = get_active_builtin_tools()
+        active_tools = [tool.schema() for tool in active_builtin_tools]
         messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = self._load_system_prompt(messages_path, summarize_enabled)
+        system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -280,7 +283,7 @@ class RLMEngine:
 
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
-            if tool_result.flush_repl_state:
+            if tool_result.flush_repl_state and self._repl is not None:
                 result += "\n[repl state flushed]"
             if tool_name == "ipython" and self.max_turns_in_context is not None:
                 turns_in_context = self._count_turns_in_context(messages)
@@ -303,7 +306,7 @@ class RLMEngine:
             # Drop old turn-groups after summarize
             if tool_result.drop_turns > 0:
                 self._drop_turns(messages, tool_result.drop_turns)
-            if tool_result.flush_repl_state:
+            if tool_result.flush_repl_state and self._repl is not None:
                 self._repl.restart_kernel()
 
             if self.max_turns_in_context is not None:
@@ -334,7 +337,9 @@ class RLMEngine:
         )
         return result
 
-    def _load_system_prompt(self, messages_path: str, summarize_enabled: bool) -> str:
+    def _load_system_prompt(
+        self, messages_path: str, active_tools: list[BuiltinTool]
+    ) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
         system_prompt = build_system_prompt(
@@ -344,7 +349,7 @@ class RLMEngine:
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             max_turns_in_context=self.max_turns_in_context,
-            summarize_enabled=summarize_enabled,
+            active_tools=active_tools,
         )
         if self.append_to_system_prompt:
             system_prompt += "\n\n" + self.append_to_system_prompt
@@ -369,6 +374,7 @@ class RLMEngine:
             exec_timeout=self.exec_timeout,
             repl=self._repl,
             state=self._tool_state,
+            cwd=self.cwd,
         )
 
     @staticmethod

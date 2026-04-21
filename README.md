@@ -2,10 +2,12 @@
 
 A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
-The model gets two built-in tools:
+The model gets four built-in tools (opt in / out via `RLM_TOOLS`):
 
-- `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`
-- `summarize` for dropping old turns from context and optionally resetting REPL state
+- `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash` (on by default)
+- `summarize` for dropping old turns from context and optionally resetting REPL state (on by default)
+- `bash` for stateless shell command execution (off by default)
+- `edit` for single-occurrence string replacement in a file (off by default)
 
 Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
 
@@ -61,6 +63,7 @@ All configuration is via environment variables:
 | `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
 | `RLM_APPEND_TO_SYSTEM_PROMPT` | — | Extra instructions appended to the generated system prompt |
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
+| `RLM_TOOLS` | `ipython,summarize` | Comma-separated subset of builtin tools to enable. Empty string = no tools. Unknown names raise. |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 
 `RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `rlm --model gpt-5-mini --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.

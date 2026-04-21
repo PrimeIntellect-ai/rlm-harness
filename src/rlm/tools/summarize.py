@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,16 +10,22 @@ from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.types import SummarizeApplied, SummarizeRejected
 
 
+_SUMMARIZE_DESCRIPTION_BASE = (
+    "Summarize and drop old turns from context to free up space. "
+    "A turn is one assistant response plus all its tool results. "
+    "Dropping num_turns removes the oldest complete turns from context."
+)
+_SUMMARIZE_DESCRIPTION_WITH_IPYTHON = (
+    f"{_SUMMARIZE_DESCRIPTION_BASE} "
+    "Optionally flush the persistent IPython state after summarization."
+)
+
+
 SUMMARIZE_SCHEMA = {
     "type": "function",
     "function": {
         "name": "summarize",
-        "description": (
-            "Summarize and drop old turns from context to free up space. "
-            "A turn is one assistant response plus all its tool results. "
-            "Dropping num_turns removes the oldest complete turns from context. "
-            "Optionally flush the persistent IPython state after summarization."
-        ),
+        "description": _SUMMARIZE_DESCRIPTION_WITH_IPYTHON,
         "parameters": {
             "type": "object",
             "properties": {
@@ -77,7 +84,21 @@ class SummarizeTool:
     name = "summarize"
 
     def schema(self) -> dict[str, Any]:
-        return SUMMARIZE_SCHEMA
+        # Lazy import to avoid a module-load cycle with registry.
+        from rlm.tools.registry import is_tool_active
+
+        schema = copy.deepcopy(SUMMARIZE_SCHEMA)
+        if not is_tool_active("ipython"):
+            schema["function"]["parameters"]["properties"].pop("flush_repl_state", None)
+            schema["function"]["description"] = _SUMMARIZE_DESCRIPTION_BASE
+        return schema
+
+    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
+        # Only mention summarize when there's a concrete limit to stay within;
+        # otherwise the tool is present but unmotivated.
+        if max_turns_in_context is None:
+            return []
+        return ["Use `summarize` to drop older turns and stay within this limit."]
 
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         state = context.state.setdefault("summarize", SummarizeState())
