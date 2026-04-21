@@ -18,6 +18,7 @@ from rlm.tools import (
     IPythonREPL,
     SummarizeState,
     ToolContext,
+    ToolOutcome,
     get_active_tools,
     get_builtin_tool,
     get_installed_skills,
@@ -177,13 +178,16 @@ class RLMEngine:
             # Log assistant message
             tool_calls_log = None
             if msg.tool_calls:
-                tool_calls_log = [
-                    {
-                        "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments),
-                    }
-                    for tc in msg.tool_calls
-                ]
+                tool_calls_log = []
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError as exc:
+                        args = {
+                            "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
+                            "_raw": tc.function.arguments,
+                        }
+                    tool_calls_log.append({"name": tc.function.name, "args": args})
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
@@ -211,15 +215,26 @@ class RLMEngine:
             # Execute the single allowed tool call
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
-            tool_args = json.loads(tc.function.arguments)
             t0 = time.time()
-            tool = get_builtin_tool(tool_name)
-            if tool is None:
-                tool_result = self._unknown_tool_result(tool_name)
-            else:
-                tool_result = await asyncio.to_thread(
-                    tool.execute, tool_args, self._tool_context(messages)
+            try:
+                tool_args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError as exc:
+                tool_result = ToolOutcome(
+                    content=(
+                        f"Error: invalid JSON arguments for tool '{tool_name}': "
+                        f"{exc.msg} at line {exc.lineno} column {exc.colno}"
+                    )
                 )
+            else:
+                tool = get_builtin_tool(tool_name)
+                if tool is None:
+                    tool_result = ToolOutcome(
+                        content=f"Error: unknown tool '{tool_name}'"
+                    )
+                else:
+                    tool_result = await asyncio.to_thread(
+                        tool.execute, tool_args, self._tool_context(messages)
+                    )
             duration = time.time() - t0
             for event in tool_result.metric_events:
                 self._metrics.record(event)
@@ -327,9 +342,3 @@ class RLMEngine:
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
         start, end = summarize_drop_slice_bounds(messages, num_turns)
         del messages[start:end]
-
-    @staticmethod
-    def _unknown_tool_result(name: str):
-        from rlm.tools.base import ToolOutcome
-
-        return ToolOutcome(content=f"Error: unknown tool '{name}'")
