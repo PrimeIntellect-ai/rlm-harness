@@ -8,6 +8,8 @@ import time
 import uuid
 from pathlib import Path
 
+from rlm.session_metrics import SessionMetricsAggregator
+
 
 class Session:
     def __init__(self, session_dir: Path | None = None):
@@ -128,8 +130,18 @@ class Session:
         if usage:
             meta_update["usage"] = usage
         if metrics is not None:
+            aggregator = SessionMetricsAggregator(self.dir)
+            direct_tool_stats = aggregator.direct_programmatic_tool_call_stats()
+            child_tool_stats = aggregator.aggregate_child_programmatic_tool_call_stats()
+            metrics.programmatic_tool_calls_python = direct_tool_stats.python_total
+            metrics.programmatic_tool_calls_bash = direct_tool_stats.bash_total
+            metrics.sub_rlm_programmatic_tool_calls_python = child_tool_stats.python_total
+            metrics.sub_rlm_programmatic_tool_calls_bash = child_tool_stats.bash_total
+            merged_tool_stats = direct_tool_stats.merge(child_tool_stats)
+
             meta_update["metrics"] = metrics.to_dict()
             meta_update["context_token_stats"] = metrics.context_token_stats()
+            meta_update["programmatic_tool_call_stats"] = merged_tool_stats.to_dict()
         self.write_meta(**meta_update)
         self._msg_file.close()
 

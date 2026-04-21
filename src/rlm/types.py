@@ -83,6 +83,12 @@ class RLMMetrics:
     branch_output_tokens_mean: float = 0.0
     branch_output_tokens_max: int = 0
 
+    # Skill-CLI invocations from inside the ipython REPL
+    programmatic_tool_calls_python: int = 0
+    programmatic_tool_calls_bash: int = 0
+    sub_rlm_programmatic_tool_calls_python: int = 0
+    sub_rlm_programmatic_tool_calls_bash: int = 0
+
     stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "context_limit", "depth_limit"
 
     @property

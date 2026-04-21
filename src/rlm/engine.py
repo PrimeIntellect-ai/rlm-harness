@@ -18,12 +18,32 @@ from rlm.tools import (
     IPythonREPL,
     SummarizeState,
     ToolContext,
+    ToolOutcome,
     get_active_tools,
     get_builtin_tool,
     get_installed_skills,
     summarize_drop_slice_bounds,
 )
 from rlm.types import RLMMetrics, RLMResult, TokenUsage
+
+
+def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
+    """Parse a tool-call arguments blob. Returns (args, error_info).
+
+    On success, args is the parsed dict and error_info is None.
+    On failure, args is None and error_info is a dict suitable for logging
+    (with ``_parse_error`` and ``_raw`` keys). Callers that need a string
+    error message should read ``error_info["_parse_error"]``.
+    """
+    try:
+        return json.loads(raw), None
+    except json.JSONDecodeError as exc:
+        return None, {
+            "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
+            "_raw": raw,
+        }
+    except TypeError as exc:
+        return None, {"_parse_error": str(exc), "_raw": raw}
 
 
 class RLMEngine:
@@ -175,16 +195,17 @@ class RLMEngine:
             msg_dict.setdefault("content", "")
             messages.append(msg_dict)
 
-            # Log assistant message
-            tool_calls_log = None
+            # Log assistant message; parse tool-call args once, reuse below.
+            tool_calls_log: list[dict] | None = None
+            parsed_args: list[dict | None] = []
             if msg.tool_calls:
-                tool_calls_log = [
-                    {
-                        "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments),
-                    }
-                    for tc in msg.tool_calls
-                ]
+                tool_calls_log = []
+                for tc in msg.tool_calls:
+                    args, err = _parse_tool_call_args(tc.function.arguments)
+                    parsed_args.append(args)
+                    tool_calls_log.append(
+                        {"name": tc.function.name, "args": err if args is None else args}
+                    )
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
@@ -209,18 +230,26 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call
+            # Execute the single allowed tool call (reuse parsed args from above)
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
-            tool_args = json.loads(tc.function.arguments)
+            tool_args = parsed_args[0]
             t0 = time.time()
-            tool = get_builtin_tool(tool_name)
-            if tool is None:
-                tool_result = self._unknown_tool_result(tool_name)
-            else:
-                tool_result = await asyncio.to_thread(
-                    tool.execute, tool_args, self._tool_context(messages)
+            if tool_args is None:
+                err_info = tool_calls_log[0]["args"]
+                tool_result = ToolOutcome(
+                    content=f"Error: invalid JSON arguments for tool '{tool_name}': {err_info['_parse_error']}"
                 )
+            else:
+                tool = get_builtin_tool(tool_name)
+                if tool is None:
+                    tool_result = ToolOutcome(
+                        content=f"Error: unknown tool '{tool_name}'"
+                    )
+                else:
+                    tool_result = await asyncio.to_thread(
+                        tool.execute, tool_args, self._tool_context(messages)
+                    )
             duration = time.time() - t0
             for event in tool_result.metric_events:
                 self._metrics.record(event)
@@ -328,9 +357,3 @@ class RLMEngine:
     def _drop_turns(messages: list[dict], num_turns: int) -> None:
         start, end = summarize_drop_slice_bounds(messages, num_turns)
         del messages[start:end]
-
-    @staticmethod
-    def _unknown_tool_result(name: str):
-        from rlm.tools.base import ToolOutcome
-
-        return ToolOutcome(content=f"Error: unknown tool '{name}'")

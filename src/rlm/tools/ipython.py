@@ -93,7 +93,9 @@ class IpythonTool:
             )
 
         return ToolOutcome(
-            content=self._maybe_truncate_output(context.repl.execute(code, timeout=timeout)),
+            content=self._maybe_truncate_output(
+                context.repl.execute(code, timeout=timeout)
+            ),
             metric_events=metric_events,
         )
 
