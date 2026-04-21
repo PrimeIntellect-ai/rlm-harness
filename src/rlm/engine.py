@@ -187,6 +187,11 @@ class RLMEngine:
                             "_parse_error": f"{exc.msg} at line {exc.lineno} column {exc.colno}",
                             "_raw": tc.function.arguments,
                         }
+                    except TypeError as exc:
+                        args = {
+                            "_parse_error": str(exc),
+                            "_raw": tc.function.arguments,
+                        }
                     tool_calls_log.append({"name": tc.function.name, "args": args})
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
@@ -223,6 +228,12 @@ class RLMEngine:
                     content=(
                         f"Error: invalid JSON arguments for tool '{tool_name}': "
                         f"{exc.msg} at line {exc.lineno} column {exc.colno}"
+                    )
+                )
+            except TypeError as exc:
+                tool_result = ToolOutcome(
+                    content=(
+                        f"Error: invalid JSON arguments for tool '{tool_name}': {exc}"
                     )
                 )
             else:
