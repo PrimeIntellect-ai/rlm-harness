@@ -61,6 +61,10 @@ def build_system_prompt(
                 f"The current context may contain at most {max_turns_in_context} assistant turns.",
             ]
         )
+        if any(tool.name == "summarize" for tool in active_tools):
+            parts.append(
+                "Use `summarize` to drop older turns and stay within this limit."
+            )
 
     if allow_recursion:
         parts.extend(
@@ -73,9 +77,5 @@ def build_system_prompt(
 
     if active_tools:
         parts.extend(["", "Call at most one built-in tool per turn."])
-        for tool in active_tools:
-            tool_lines = tool.prompt_lines(max_turns_in_context=max_turns_in_context)
-            if tool_lines:
-                parts.extend(["", *tool_lines])
 
     return "\n".join(parts)

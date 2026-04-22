@@ -70,12 +70,6 @@ class IpythonTool:
         )
         return schema
 
-    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
-        # Static tool — all usage info lives in the OpenAI tool description
-        # (IPYTHON_SCHEMA), which the model already receives via the tools
-        # parameter. No system-prompt duplication.
-        return []
-
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         code = args.get("code", "")
         if not isinstance(code, str):

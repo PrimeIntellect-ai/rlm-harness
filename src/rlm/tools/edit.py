@@ -52,10 +52,6 @@ class EditTool:
     def schema(self) -> dict[str, Any]:
         return copy.deepcopy(EDIT_SCHEMA)
 
-    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
-        # Static tool — usage info lives in the OpenAI tool description.
-        return []
-
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         path = args.get("path")
         old_str = args.get("old_str")

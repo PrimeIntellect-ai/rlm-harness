@@ -61,10 +61,6 @@ class BashTool:
         )
         return schema
 
-    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
-        # Static tool — usage info lives in the OpenAI tool description.
-        return []
-
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         command = args.get("command", "")
         if not isinstance(command, str):
