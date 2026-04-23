@@ -42,10 +42,10 @@ def build_system_prompt(
         )
     if installed_skills:
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
-        skill_lines.append(f"Installed skills: {installed}.")
+        skill_lines.append(f"Installed skills (pre-imported): {installed}.")
         skill_lines.append(
-            "Each skill is available as a Python module by the same name: `import <skill>`. "
-            "Inspect its schema via `<skill>.PARAMETERS`, and call its async entrypoint via `<skill>.run(...)`."
+            "Call each skill directly: `await <skill>(...)`. "
+            "Inspect its schema via `<skill>.PARAMETERS`."
         )
         skill_lines.append(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "
@@ -70,8 +70,8 @@ def build_system_prompt(
         parts.extend(
             [
                 "",
-                "The `rlm` module is pre-imported. Call `await rlm.run('sub-task')` to spawn a recursive sub-agent.",
-                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm.run('task1'), rlm.run('task2'))`.",
+                "The `rlm` module is pre-imported. Call `answer = await rlm('sub-task')` to spawn a recursive sub-agent; returns the sub-agent's final answer as a string.",
+                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
             ]
         )
 
