@@ -42,14 +42,15 @@ def build_system_prompt(
         )
     if installed_skills:
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
-        skill_lines.append(f"Installed skills (pre-imported): {installed}.")
+        skill_lines.append(f"Installed skills: {installed}.")
         skill_lines.append(
-            "Each skill is an async function by the same name. "
+            "Each skill is a Python package with an async `run` function. "
+            "Call it with `import <skill>; await <skill>.run(...)`. "
             "Inspect its schema via `<skill>.PARAMETERS`."
         )
         skill_lines.append(
-            "Each skill is also available as a shell command by the same name: `<skill> ...`. "
-            "Discover its CLI usage with `<skill> --help`."
+            "Each skill is also available as a shell command by the same name: `!<skill> ...`. "
+            "Discover its CLI usage with `!<skill> --help`."
         )
     if skill_lines:
         parts.extend(["", *skill_lines])
@@ -70,8 +71,8 @@ def build_system_prompt(
         parts.extend(
             [
                 "",
-                "The `rlm` module is pre-imported. `rlm` is an async function: give it a prompt (string), get back the sub-agent's final answer (string). Use it to spawn a recursive sub-agent.",
-                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
+                "Spawn a recursive sub-agent with `from rlm import run; result = await run('sub-task')`. `run` returns an `RLMResult`; read `result.answer` for the sub-agent's final answer (string).",
+                "For parallel sub-agents: `await asyncio.gather(run('task1'), run('task2'))`.",
             ]
         )
 
