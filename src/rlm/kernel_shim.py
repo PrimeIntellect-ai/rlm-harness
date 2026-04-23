@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import os
 import shutil
 import sys
 import types
 from pathlib import Path
+from typing import Any
 
 
 def _read_parameters(skill_src: Path) -> dict:
@@ -45,10 +47,32 @@ def _read_parameters(skill_src: Path) -> dict:
     return {}
 
 
+def _maybe_decode(out: str) -> Any:
+    """Decode structured skill output transparently.
+
+    Skills communicate via subprocess stdout, so their return values
+    always arrive as strings. When a skill prints a valid JSON value
+    (list, dict, number, bool, null, or a quoted string), decode it so
+    callers get the native Python object — avoids the
+    ``if events:`` footgun where ``"[]"`` (a non-empty string) is truthy
+    even though the underlying list is empty.
+
+    Plain text output (anything that isn't valid JSON) is returned
+    as-is, preserving existing behaviour for skills that return
+    free-form strings.
+    """
+    if not out:
+        return out
+    try:
+        return json.loads(out)
+    except (json.JSONDecodeError, ValueError):
+        return out
+
+
 def _make_run(cli_name: str):
     """Create an async run() that delegates to the skill CLI."""
 
-    async def run(**kwargs) -> str:
+    async def run(**kwargs) -> Any:
         cmd = [cli_name]
         for key, value in kwargs.items():
             flag = f"--{key.replace('_', '-')}"
@@ -73,7 +97,7 @@ def _make_run(cli_name: str):
         if proc.returncode != 0:
             err = stderr.decode().strip()
             return err or out or f"{cli_name} exited with code {proc.returncode}"
-        return out
+        return _maybe_decode(out)
 
     return run
 
