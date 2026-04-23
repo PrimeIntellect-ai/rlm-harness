@@ -20,12 +20,19 @@ uv sync
 source .venv/bin/activate
 ```
 
-## Dev setup
+## Developing
 
 After `uv sync`, enable the pre-commit hooks:
 
 ```bash
 uv run pre-commit install
+```
+
+Lint and format manually:
+
+```bash
+uv run ruff check --fix .
+uv run ruff format .
 ```
 
 ## CLI
