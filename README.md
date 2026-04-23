@@ -196,6 +196,21 @@ Lightweight proxy modules are always registered at kernel startup, guaranteeing 
 | `RLM_KERNEL_PYTHON` | `sys.executable` | Python interpreter for the IPython kernel |
 | `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout |
 
+## Developing
+
+After `uv sync`, enable the pre-commit hooks:
+
+```bash
+uv run pre-commit install
+```
+
+Lint and format manually:
+
+```bash
+uv run ruff check --fix .
+uv run ruff format .
+```
+
 ## Testing
 
 Install dev dependencies and run the suite:

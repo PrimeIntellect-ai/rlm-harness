@@ -19,6 +19,8 @@ rlm = "rlm.cli:main"
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
+    "ruff",
+    "pre-commit",
 ]
 
 [tool.pytest.ini_options]
