@@ -12,6 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
+from rlm.tools.skills import get_installed_skills
 from rlm.types import IpythonExecuted
 
 if TYPE_CHECKING:
@@ -142,18 +143,56 @@ class IPythonREPL:
         self._inject_startup()
 
     def _inject_startup(self):
-        """Set up kernel: cwd, env vars, nest_asyncio."""
+        """Set up kernel: cwd, env vars, nest_asyncio, skill pre-imports."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
+        max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
+        allow_recursion = depth < max_depth
+        installed_skills = get_installed_skills()
 
         setup_code = f"""\
-import os
+import os, sys, types
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 
 import nest_asyncio
 nest_asyncio.apply()
+
+
+class _CallableModule(types.ModuleType):
+    # Make `await <skill>(...)` shorthand for `await <skill>.run(...)`.
+    # __call__ is looked up on the type, not the instance, so the
+    # override has to live on the class.
+    async def __call__(self, *args, **kwargs):
+        return await self.run(*args, **kwargs)
+
+
+def _wrap_callable(mod):
+    wrapped = _CallableModule(mod.__name__)
+    wrapped.__dict__.update(mod.__dict__)
+    sys.modules[mod.__name__] = wrapped
+    return wrapped
+
+
+for _name in {installed_skills!r}:
+    globals()[_name] = _wrap_callable(__import__(_name))
+
+if {allow_recursion!r}:
+    import rlm as _rlm_pkg
+
+    class _RLMCallable(types.ModuleType):
+        # `await rlm('task')` returns the sub-agent's final answer as a
+        # plain string (matching the legacy agent-facing API); callers
+        # who want the full RLMResult can still use `await rlm.run(...)`.
+        async def __call__(self, prompt, **kwargs):
+            result = await _rlm_pkg.run(prompt, **kwargs)
+            return result.answer
+
+    _rlm_mod = _RLMCallable('rlm')
+    _rlm_mod.__dict__.update(_rlm_pkg.__dict__)
+    sys.modules['rlm'] = _rlm_mod
+    globals()['rlm'] = _rlm_mod
 """
         self._execute_silent(setup_code)
 
