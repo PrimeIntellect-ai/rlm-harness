@@ -27,6 +27,7 @@ def build_system_prompt(
     parts: list[str] = [
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating one step at a time.",
         "When you are done, stop calling tools and state your final answer.",
+        "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
         "",
         f"Working directory: {cwd}",
         f"Conversation log: {messages_path}",
@@ -55,7 +56,7 @@ def build_system_prompt(
         parts.extend(
             [
                 "",
-                "The `rlm` module is pre-imported. `rlm` is an async function: give it a prompt (string), get back the sub-agent's final answer (string). Use it to spawn a recursive sub-agent.",
+                "The `rlm` module is pre-imported. `await rlm('sub-task')` spawns a recursive sub-agent and returns an `RLMResult` with `.answer` (string), `.usage`, `.turns`, and `.session_dir`.",
                 "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
             ]
         )
