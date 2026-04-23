@@ -26,19 +26,16 @@ class IpythonExecuted:
 
 
 @dataclass(frozen=True)
-class SummarizeRejected:
-    pass
+class CompactionApplied:
+    """Emitted when the engine auto-compacts context after a summary turn."""
 
-
-@dataclass(frozen=True)
-class SummarizeApplied:
-    num_turns: int
-    summary_chars: int
+    num_turns_dropped: int
     dropped_chars: int
-    turns_since_last_summarize: int
+    summary_chars: int
+    turns_since_last_compaction: int
 
 
-BuiltinMetricEvent = IpythonExecuted | SummarizeRejected | SummarizeApplied
+BuiltinMetricEvent = IpythonExecuted | CompactionApplied
 
 
 @dataclass
@@ -173,15 +170,13 @@ class ChildSessionAggregate:
 class RLMMetrics:
     """Metrics tracked during an rlm session."""
 
-    # Turn metrics
-    turns_since_last_summarize: int = 0
-    turns_between_summarizes_mean: float = 0.0
-
-    # Summarize metrics
-    summarize_rejected_count: int = 0
-    summarize_turns_dropped_mean: float = 0.0
-    summarize_chars_dropped_mean: float = 0.0
-    summarize_summary_chars_mean: float = 0.0
+    # Compaction metrics (auto-summarization at a token threshold)
+    compactions_count: int = 0
+    turns_since_last_compaction: int = 0
+    turns_between_compactions_mean: float = 0.0
+    compaction_turns_dropped_mean: float = 0.0
+    compaction_chars_dropped_mean: float = 0.0
+    compaction_summary_chars_mean: float = 0.0
 
     # IPython input size metrics
     ipython_input_chars_mean: float = 0.0
@@ -192,11 +187,10 @@ class RLMMetrics:
     _ipython_call_count: int = field(default=0, repr=False)
     _ipython_input_chars_total: int = field(default=0, repr=False)
     _ipython_input_loc_total: int = field(default=0, repr=False)
-    _summarize_applied_count: int = field(default=0, repr=False)
-    _turns_between_summarizes_total: int = field(default=0, repr=False)
-    _summarize_turns_dropped_total: int = field(default=0, repr=False)
-    _summarize_chars_dropped_total: int = field(default=0, repr=False)
-    _summarize_summary_chars_total: int = field(default=0, repr=False)
+    _turns_between_compactions_total: int = field(default=0, repr=False)
+    _compaction_turns_dropped_total: int = field(default=0, repr=False)
+    _compaction_chars_dropped_total: int = field(default=0, repr=False)
+    _compaction_summary_chars_total: int = field(default=0, repr=False)
 
     # Public work/cost token metrics
     sub_rlm_input_tokens: int = 0
@@ -218,7 +212,7 @@ class RLMMetrics:
     sub_rlm_programmatic_tool_calls_python: int = 0
     sub_rlm_programmatic_tool_calls_bash: int = 0
 
-    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "context_limit", "depth_limit"
+    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "depth_limit"
 
     @property
     def turns(self) -> int:
@@ -349,19 +343,17 @@ class RLMMetrics:
             self._ipython_call_count += 1
             self._ipython_input_chars_total += event.input_chars
             self._ipython_input_loc_total += event.input_loc
-        elif isinstance(event, SummarizeRejected):
-            self.summarize_rejected_count += 1
-        elif isinstance(event, SummarizeApplied):
-            self._summarize_applied_count += 1
-            self._turns_between_summarizes_total += event.turns_since_last_summarize
-            self._summarize_turns_dropped_total += event.num_turns
-            self._summarize_chars_dropped_total += event.dropped_chars
-            self._summarize_summary_chars_total += event.summary_chars
+        elif isinstance(event, CompactionApplied):
+            self.compactions_count += 1
+            self._turns_between_compactions_total += event.turns_since_last_compaction
+            self._compaction_turns_dropped_total += event.num_turns_dropped
+            self._compaction_chars_dropped_total += event.dropped_chars
+            self._compaction_summary_chars_total += event.summary_chars
+            # End the old branch for token accounting, then reset the retained
+            # completion-token window so the next branch starts clean.
             self.finalize_current_branch()
-            for _ in range(min(event.num_turns, len(self._retained_completion_tokens))):
-                self._retained_completion_tokens_total -= (
-                    self._retained_completion_tokens.popleft()
-                )
+            self._retained_completion_tokens.clear()
+            self._retained_completion_tokens_total = 0
         else:
             raise TypeError(f"Unsupported builtin metric event: {type(event)!r}")
 
@@ -375,18 +367,18 @@ class RLMMetrics:
             self.ipython_input_loc_mean = (
                 self._ipython_input_loc_total / self._ipython_call_count
             )
-        if self._summarize_applied_count:
-            self.turns_between_summarizes_mean = (
-                self._turns_between_summarizes_total / self._summarize_applied_count
+        if self.compactions_count:
+            self.turns_between_compactions_mean = (
+                self._turns_between_compactions_total / self.compactions_count
             )
-            self.summarize_turns_dropped_mean = (
-                self._summarize_turns_dropped_total / self._summarize_applied_count
+            self.compaction_turns_dropped_mean = (
+                self._compaction_turns_dropped_total / self.compactions_count
             )
-            self.summarize_chars_dropped_mean = (
-                self._summarize_chars_dropped_total / self._summarize_applied_count
+            self.compaction_chars_dropped_mean = (
+                self._compaction_chars_dropped_total / self.compactions_count
             )
-            self.summarize_summary_chars_mean = (
-                self._summarize_summary_chars_total / self._summarize_applied_count
+            self.compaction_summary_chars_mean = (
+                self._compaction_summary_chars_total / self.compactions_count
             )
 
         if self._branch_count:
