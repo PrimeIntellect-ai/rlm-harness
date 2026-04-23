@@ -196,6 +196,15 @@ Lightweight proxy modules are always registered at kernel startup, guaranteeing 
 | `RLM_KERNEL_PYTHON` | `sys.executable` | Python interpreter for the IPython kernel |
 | `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout |
 
+## Testing
+
+Install dev dependencies and run the suite:
+
+```bash
+uv sync --group dev
+uv run pytest tests/
+```
+
 ## Interactive Mode
 
 Running `rlm` with no prompts enters a placeholder interactive mode. The TUI is not implemented yet.
