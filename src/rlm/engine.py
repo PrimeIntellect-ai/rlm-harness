@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 import time
+from pathlib import Path
 
 from openai import AsyncOpenAI
 
@@ -17,15 +17,55 @@ from rlm.tools import (
     SKILLS_DIR,
     BuiltinTool,
     IPythonREPL,
-    SummarizeState,
     ToolContext,
     ToolOutcome,
     get_active_builtin_tools,
     get_builtin_tool,
     get_installed_skills,
-    summarize_drop_slice_bounds,
 )
-from rlm.types import RLMMetrics, RLMResult, TokenUsage
+from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
+
+
+# Injected as a user message when the branch's context size reaches the
+# compaction threshold. The model's next reply is expected to be a
+# plain-text handoff summary; any tool calls it emits are ignored and
+# the message is compacted in place of them.
+CHECKPOINT_COMPACTION_PROMPT = (
+    "You are performing a CONTEXT CHECKPOINT COMPACTION. "
+    "Create a handoff summary for another LLM that will resume the task.\n"
+    "\n"
+    "Include:\n"
+    "- Current progress and key decisions made\n"
+    "- Important context, constraints, or user preferences\n"
+    "- What remains to be done (clear next steps)\n"
+    "- Any critical data, examples, or references needed to continue\n"
+    "\n"
+    "Be concise, structured, and focused on helping the next LLM "
+    "seamlessly continue the work."
+)
+
+# Appended to the checkpoint prompt when the IPython REPL is active.
+# The kernel is restarted on compaction, so the next LLM inherits an
+# empty Python state — flag this so the summary captures anything the
+# next LLM would otherwise need to rebuild from scratch.
+REPL_RESTART_NOTE = (
+    "\n\n"
+    "Note: the IPython kernel will be restarted after this summary. "
+    "All Python variables, imports, loaded data, and in-memory state "
+    "will be wiped. Capture anything the next LLM needs to re-establish "
+    "(key values, file paths, loaded datasets, etc.) in the summary itself."
+)
+
+# Wrapper text that frames the summary as the sole user-facing context
+# for the post-compaction branch. The original task prompt is dropped;
+# the summary is responsible for carrying the goal.
+POST_COMPACTION_FRAMING = (
+    "Another language model started to solve this problem and produced "
+    "a summary of its thinking process. Use this to build on the work "
+    "that has already been done and avoid duplicating work. Here is "
+    "the summary produced by the other language model, use the "
+    "information in this summary to assist with your own analysis:"
+)
 
 
 def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
@@ -59,12 +99,43 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     return args, None
 
 
+def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
+    """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
+
+    Accepts:
+      - ``None`` / empty string → disabled.
+      - ``int`` → fixed threshold.
+      - ``str`` (from env var) → "N".
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError("summarize_at_tokens must be an int")
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"summarize_at_tokens must be an int (got {value!r})"
+            ) from exc
+    elif isinstance(value, int):
+        parsed = value
+    else:
+        raise ValueError(
+            f"summarize_at_tokens must be int or None (got {type(value).__name__})"
+        )
+
+    if parsed <= 0:
+        raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
+    return parsed
+
+
 class RLMEngine:
     def __init__(
         self,
         model: str | None = None,
         max_turns: int | None = None,
-        max_turns_in_context: int | None = None,
+        summarize_at_tokens: int | None = None,
         system_prompt_path: str | None = None,
         append_to_system_prompt: str | None = None,
         cwd: str | None = None,
@@ -81,12 +152,14 @@ class RLMEngine:
                 "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
             )
         self.max_output = max_output
-        limit = max_turns_in_context
-        if limit is None:
-            limit = int(os.environ.get("RLM_MAX_TURNS_IN_CONTEXT", "-1"))
-        if limit < -1 or limit in (0, 1):
-            raise ValueError("RLM_MAX_TURNS_IN_CONTEXT must be -1 (unlimited) or >= 2")
-        self.max_turns_in_context = None if limit == -1 else limit
+
+        # Auto-compaction threshold: user kwarg wins; otherwise parse env var.
+        if summarize_at_tokens is None:
+            env_value = os.environ.get("RLM_SUMMARIZE_AT_TOKENS")
+        else:
+            env_value = summarize_at_tokens
+        self.summarize_at_tokens = _parse_summarize_at_tokens(env_value)
+
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
         )
@@ -108,11 +181,15 @@ class RLMEngine:
         # Metrics
         self._metrics = RLMMetrics()
 
-        self._tool_state = {"summarize": SummarizeState()}
+        self._tool_state: dict[str, object] = {}
 
         # IPython REPL (started lazily in single-agent execution)
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
+
+        # Turn index (0-based) at the start of the current branch. Used to
+        # report "turns since last compaction" when a compaction fires.
+        self._branch_start_turn: int = 0
 
     def _ensure_session(self):
         """Create session if not set."""
@@ -200,10 +277,9 @@ class RLMEngine:
 
             # Update metrics
             self._metrics.turns = turn + 1
-            summarize_state = self._tool_state["summarize"]
-            self._metrics.turns_since_last_summarize = (
-                turn + 1
-            ) - summarize_state.turn_at_last_summarize
+            self._metrics.turns_since_last_compaction = (
+                turn + 1 - self._branch_start_turn
+            )
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
@@ -283,13 +359,6 @@ class RLMEngine:
 
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
-            if tool_result.flush_repl_state and self._repl is not None:
-                result += "\n[repl state flushed]"
-            if tool_name == "ipython" and self.max_turns_in_context is not None:
-                turns_in_context = self._count_turns_in_context(messages)
-                result += (
-                    f"\n[context turns: {turns_in_context}/{self.max_turns_in_context}]"
-                )
 
             self.session.log_tool_result(turn, tool_name, result, duration)
             messages.append(
@@ -303,19 +372,15 @@ class RLMEngine:
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
 
-            # Drop old turn-groups after summarize
-            if tool_result.drop_turns > 0:
-                self._drop_turns(messages, tool_result.drop_turns)
-            if tool_result.flush_repl_state and self._repl is not None:
-                self._repl.restart_kernel()
-
-            if self.max_turns_in_context is not None:
-                turns_in_context = self._count_turns_in_context(messages)
-                if turns_in_context > self.max_turns_in_context:
-                    self._metrics.stop_reason = "context_limit"
-                    n = f"{turns_in_context}/{self.max_turns_in_context}"
-                    final_text = f"[context limit exceeded: {n} turns in context]"
-                    break
+            # Auto-compaction: if this turn's prompt_tokens reached the
+            # configured threshold, ask the model for a handoff summary and
+            # rebuild the branch around it. Fires at most once per loop
+            # iteration; the compaction op takes its own LLM call.
+            if (
+                self.summarize_at_tokens is not None
+                and usage.prompt_tokens >= self.summarize_at_tokens
+            ):
+                await self._compact_branch(messages, turn)
         else:
             self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"
@@ -337,6 +402,79 @@ class RLMEngine:
         )
         return result
 
+    async def _compact_branch(self, messages: list[dict], turn: int) -> None:
+        """Ask the model for a handoff summary and rebuild ``messages``.
+
+        Called in-place: mutates ``messages`` to ``[system, user(framing +
+        summary)]`` and restarts the ipython kernel. The LLM call for the
+        summary doesn't count toward ``max_turns`` — it's housekeeping,
+        not a work turn — but its tokens land in ``_total_usage`` for
+        cost accounting.
+        """
+        # Measure what's about to be dropped BEFORE appending the
+        # checkpoint prompt — otherwise the prompt's own chars get
+        # counted as "dropped conversation content", inflating the
+        # metric and the session log's dropped_chars field.
+        dropped_chars = _count_messages_chars(messages[2:])
+        turns_since_last = turn + 1 - self._branch_start_turn
+
+        # Append the checkpoint prompt and ask the model for a summary
+        # turn with NO tools available so it can only respond with text.
+        # Warn about the REPL restart only when a kernel is actually running.
+        checkpoint_prompt = CHECKPOINT_COMPACTION_PROMPT
+        if self._repl is not None:
+            checkpoint_prompt += REPL_RESTART_NOTE
+        messages.append({"role": "user", "content": checkpoint_prompt})
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+        )
+        usage = extract_usage(response)
+        self._total_usage.prompt_tokens += usage.prompt_tokens
+        self._total_usage.completion_tokens += usage.completion_tokens
+
+        summary_text = response.choices[0].message.content or ""
+
+        system_msg = messages[0]
+        compacted_user_content = POST_COMPACTION_FRAMING + "\n\n" + summary_text
+        messages[:] = [
+            system_msg,
+            {"role": "user", "content": compacted_user_content},
+        ]
+
+        # Log the compaction for traceability.
+        self.session.log(
+            {
+                "type": "compaction",
+                "turn": turn,
+                "summary": summary_text,
+                "summary_chars": len(summary_text),
+                "dropped_chars": dropped_chars,
+                "turns_since_last_compaction": turns_since_last,
+                "usage": {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                },
+            }
+        )
+
+        # Reset the persistent ipython kernel: the new "next LLM" shouldn't
+        # inherit live Python state it can't see in its context.
+        if self._repl is not None:
+            self._repl.restart_kernel()
+
+        # Metrics: close the old branch.
+        self._metrics.record(
+            CompactionApplied(
+                num_turns_dropped=turns_since_last,
+                dropped_chars=dropped_chars,
+                summary_chars=len(summary_text),
+                turns_since_last_compaction=turns_since_last,
+            )
+        )
+        self._branch_start_turn = turn + 1
+        self._metrics.turns_since_last_compaction = 0
+
     def _load_system_prompt(
         self, messages_path: str, active_tools: list[BuiltinTool]
     ) -> str:
@@ -348,7 +486,6 @@ class RLMEngine:
             get_installed_skills(),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
-            max_turns_in_context=self.max_turns_in_context,
             active_tools=active_tools,
         )
         if self.append_to_system_prompt:
@@ -377,11 +514,58 @@ class RLMEngine:
             cwd=self.cwd,
         )
 
-    @staticmethod
-    def _count_turns_in_context(messages: list[dict]) -> int:
-        return sum(1 for message in messages if message["role"] == "assistant")
 
-    @staticmethod
-    def _drop_turns(messages: list[dict], num_turns: int) -> None:
-        start, end = summarize_drop_slice_bounds(messages, num_turns)
-        del messages[start:end]
+def _count_messages_chars(messages: list[dict]) -> int:
+    """Sum the content-char length across ``messages`` (text + tool-call args).
+
+    Used as a rough "how much was dropped" metric on compaction. Tool-call
+    argument strings are counted since they consume context just like
+    message content does.
+    """
+    total = 0
+    for message in messages:
+        total += _content_chars(message.get("content"))
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                total += _tool_call_chars(tc)
+    return total
+
+
+def _content_chars(content) -> int:
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(_content_chars(item) for item in content)
+    if isinstance(content, dict):
+        total = 0
+        for field_name in ("text", "input_text", "output_text"):
+            value = content.get(field_name)
+            if isinstance(value, str):
+                total += len(value)
+        nested = content.get("content")
+        if nested is not None:
+            total += _content_chars(nested)
+        return total
+    return 0
+
+
+def _tool_call_chars(tool_call) -> int:
+    if isinstance(tool_call, dict):
+        function = tool_call.get("function")
+    else:
+        function = getattr(tool_call, "function", None)
+    if function is None:
+        return 0
+    if isinstance(function, dict):
+        name = function.get("name")
+        arguments = function.get("arguments")
+    else:
+        name = getattr(function, "name", None)
+        arguments = getattr(function, "arguments", None)
+    total = 0
+    if isinstance(name, str):
+        total += len(name)
+    if isinstance(arguments, str):
+        total += len(arguments)
+    return total

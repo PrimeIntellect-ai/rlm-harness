@@ -8,12 +8,10 @@ from rlm.tools.base import BuiltinTool
 from rlm.tools.bash import BashTool
 from rlm.tools.edit import EditTool
 from rlm.tools.ipython import IpythonTool
-from rlm.tools.summarize import SummarizeTool
 
 
 _BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (
     IpythonTool(),
-    SummarizeTool(),
     BashTool(),
     EditTool(),
 )
@@ -23,10 +21,10 @@ _TOOLS_BY_NAME: dict[str, BuiltinTool] = {tool.name: tool for tool in _BUILTIN_T
 def _active_tool_names() -> list[str]:
     """Resolve the active builtin-tool names from the ``RLM_TOOLS`` env var.
 
-    Unset → ``["ipython", "summarize"]`` (convenience default for direct CLI
-    use; all other callers — notably the verifiers rlm_harness — are
-    expected to set ``RLM_TOOLS`` explicitly so the tool set is a single
-    source of truth).
+    Unset → ``["ipython"]`` (convenience default for direct CLI use; all
+    other callers — notably the verifiers rlm_harness — are expected to
+    set ``RLM_TOOLS`` explicitly so the tool set is a single source of
+    truth).
     Comma-separated list → that subset, preserving user-specified order.
     Empty string → no tools (pure chat mode).
     Unknown names → ``ValueError``.
@@ -34,7 +32,7 @@ def _active_tool_names() -> list[str]:
     """
     raw = os.environ.get("RLM_TOOLS")
     if raw is None:
-        return ["ipython", "summarize"]
+        return ["ipython"]
     names: list[str] = []
     for token in raw.split(","):
         name = token.strip()

@@ -15,25 +15,22 @@ def build_system_prompt(
     messages_path: str,
     *,
     allow_recursion: bool,
-    max_turns_in_context: int | None,
     active_tools: list[BuiltinTool],
 ) -> str:
     """Build the system prompt.
 
-    Layout: role → work instructions → environment (cwd, log path, skills) →
-    constraints (max turns) → capabilities (recursion) → tool API. Tools come
-    last so the model has already seen any constraints that motivate them
-    (e.g. summarize makes sense only once the turns-in-context limit is known).
+    Layout: role → environment (cwd, log path, skills) → capabilities
+    (recursion) → tool API. Keep it tight: the model also receives the
+    per-tool schemas, so redundant tool guidance here just inflates
+    every request.
     """
     parts: list[str] = [
-        "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating.",
-        "",
-        "Work one step at a time: execute code, read the output, then decide your next step.",
+        "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating one step at a time.",
         "When you are done, stop calling tools and state your final answer.",
+        "",
         f"Working directory: {cwd}",
         "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
-        "",
-        f"Your conversation is logged to {messages_path}.",
+        f"Conversation log: {messages_path}",
     ]
 
     skill_lines: list[str] = []
@@ -54,18 +51,6 @@ def build_system_prompt(
         )
     if skill_lines:
         parts.extend(["", *skill_lines])
-
-    if max_turns_in_context is not None:
-        parts.extend(
-            [
-                "",
-                f"The current context may contain at most {max_turns_in_context} assistant turns.",
-            ]
-        )
-        if any(tool.name == "summarize" for tool in active_tools):
-            parts.append(
-                "Use `summarize` to drop older turns and stay within this limit."
-            )
 
     if allow_recursion:
         parts.extend(
