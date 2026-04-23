@@ -151,7 +151,7 @@ class IPythonREPL:
         installed_skills = get_installed_skills()
 
         setup_code = f"""\
-import os, sys, types
+import os
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
@@ -159,27 +159,12 @@ os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 import nest_asyncio
 nest_asyncio.apply()
 
-
-class _CallableModule(types.ModuleType):
-    # Make `await <skill>(...)` shorthand for `await <skill>.run(...)`.
-    # __call__ is looked up on the type, not the instance, so the
-    # override has to live on the class.
-    async def __call__(self, *args, **kwargs):
-        return await self.run(*args, **kwargs)
-
-
-def _wrap_callable(mod):
-    wrapped = _CallableModule(mod.__name__)
-    wrapped.__dict__.update(mod.__dict__)
-    sys.modules[mod.__name__] = wrapped
-    return wrapped
-
-
 for _name in {installed_skills!r}:
-    globals()[_name] = _wrap_callable(__import__(_name))
+    globals()[_name] = __import__(_name)
 
 if {allow_recursion!r}:
-    globals()['rlm'] = _wrap_callable(__import__('rlm'))
+    import rlm
+    globals()['rlm'] = rlm
 """
         self._execute_silent(setup_code)
 
