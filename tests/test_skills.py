@@ -3,9 +3,9 @@
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a real
 skill fixture on PATH; the engine starts its own IPython kernel to
 dispatch the ``ipython`` tool call, so the code inside the kernel hits
-the real ``kernel_shim → subprocess`` path the model takes:
+the real skill the model would see:
 
-- python form → ``await add(...)`` dispatches through the kernel shim
+- python form → ``await add(...)`` calls into the imported skill's ``run``
 - bash form   → ``!add ...`` runs the CLI directly from PATH
 
 Skill fixtures live under ``tests/fixtures/skills/<name>/``.
@@ -57,3 +57,24 @@ async def test_valid_bash_skill(session):
 
     assert tool_result(client).strip() == "5"
     assert result.answer == "the sum is 5"
+
+
+async def test_invalid_skill_args(session):
+    """Skill called with a missing arg: the TypeError traceback is returned to the model."""
+    prompt = "compute 2 + ?"
+    messages = [
+        DummyMessage(
+            tool_calls=[DummyToolCall("ipython", {"code": "print(await add(a=2))"})]
+        ),
+        DummyMessage(content="the call failed"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    result = await engine.run(prompt)
+
+    output = tool_result(client)
+    assert "TypeError" in output
+    assert "missing 1 required positional argument: 'b'" in output
+    assert result.answer == "the call failed"
