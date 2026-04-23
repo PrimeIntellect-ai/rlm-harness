@@ -28,8 +28,8 @@ def build_system_prompt(
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating one step at a time.",
         "When you are done, stop calling tools and state your final answer.",
         "",
-        f"Working directory: {cwd}",
         "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
+        f"Working directory: {cwd}",
         f"Conversation log: {messages_path}",
     ]
 
