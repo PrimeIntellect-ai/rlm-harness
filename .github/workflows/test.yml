@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    name: RLM
+    name: Pytest
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
