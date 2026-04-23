@@ -22,8 +22,9 @@ source .venv/bin/activate
 
 ## Dev setup
 
+After `uv sync`, enable the pre-commit hooks:
+
 ```bash
-uv sync --all-groups
 uv run pre-commit install
 ```
 
