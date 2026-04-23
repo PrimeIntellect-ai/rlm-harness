@@ -20,6 +20,13 @@ uv sync
 source .venv/bin/activate
 ```
 
+## Dev setup
+
+```bash
+uv sync --all-groups
+uv run pre-commit install
+```
+
 ## CLI
 
 ```bash
