@@ -148,6 +148,8 @@ class IPythonREPL:
         """Set up kernel: cwd, nest_asyncio, env vars, skill shims."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
+        max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
+        allow_recursion = depth < max_depth
         shim_file = str(Path(__file__).resolve().parent.parent / "kernel_shim.py")
         skills_dir = str(TASK_SKILLS_DIR)
 
@@ -169,7 +171,18 @@ import importlib.util as _ilu
 _spec = _ilu.spec_from_file_location("kernel_shim", {shim_file!r})
 _shim = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_shim)
-_shim.install_shims({skills_dir!r})
+_shimmed = _shim.install_shims({skills_dir!r})
+
+# Pre-import each shimmed name into the kernel's user namespace so the
+# model can call skills directly (`await edit(...)`) without writing
+# `import edit` every turn. `rlm` is gated on recursion being allowed;
+# without the gate it would appear in globals in non-recursive envs,
+# which is confusing (the prompt doesn't advertise it there).
+_allow_recursion = {allow_recursion!r}
+for _name in _shimmed:
+    if _name == "rlm" and not _allow_recursion:
+        continue
+    globals()[_name] = sys.modules[_name]
 """
         self._execute_silent(setup_code)
 

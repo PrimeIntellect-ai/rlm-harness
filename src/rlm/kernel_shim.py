@@ -1,8 +1,11 @@
 """Skill shims for external ipython kernels.
 
 Registers lightweight proxy modules so that ``import edit``,
-``edit.PARAMETERS``, and ``await edit.run(...)`` work in the ipython
-kernel — delegating to the skill CLIs on PATH via subprocess.
+``edit.PARAMETERS``, ``await edit(...)``, and ``await edit.run(...)``
+all work in the ipython kernel — delegating to the skill CLIs on PATH
+via subprocess. The callable form (``await edit(...)``) and the named
+form (``await edit.run(...)``) are equivalent; the former is the
+advertised style, the latter is kept as a back-compat alias.
 
 Shims are always installed regardless of whether a same-named module
 exists, guaranteeing the kernel uses the uploaded skills.
@@ -102,9 +105,23 @@ def _make_run(cli_name: str):
     return run
 
 
+class _CallableModule(types.ModuleType):
+    """Module subclass that forwards ``__call__`` to ``self.run``.
+
+    Python's implicit special-method lookup finds ``__call__`` on the
+    type, so putting it here (rather than as an attribute on the
+    instance) is what makes ``await edit(...)`` actually work.
+    ``edit.run(...)`` keeps working too — it's the same coroutine
+    function assigned in ``_make_proxy``.
+    """
+
+    async def __call__(self, *args, **kwargs):
+        return await self.run(*args, **kwargs)
+
+
 def _make_proxy(name: str, parameters: dict) -> types.ModuleType:
     """Create a proxy module for a skill."""
-    mod = types.ModuleType(name)
+    mod = _CallableModule(name)
     mod.__doc__ = f"Proxy for the {name} skill (delegates to CLI)."
     mod.__path__ = []  # make it look like a package
     mod.PARAMETERS = parameters
@@ -148,13 +165,16 @@ def install_shims(skills_dir: str) -> list[str]:
         sys.modules[name] = _make_proxy(name, parameters)
         shimmed.append(name)
 
-    # Also shim `rlm` itself for sub-agent recursion
+    # Also shim `rlm` itself for sub-agent recursion. Unlike the real
+    # Python API (which returns a structured RLMResult), the shim only
+    # sees CLI stdout — just the answer — so it returns a plain string.
+    # Callers who want session_dir / usage / turns can read meta.json.
     if shutil.which("rlm"):
-        mod = types.ModuleType("rlm")
+        mod = _CallableModule("rlm")
         mod.__doc__ = "Proxy for the rlm CLI (sub-agent recursion)."
         mod.__path__ = []
 
-        async def _rlm_run(prompt: str, **kwargs) -> types.SimpleNamespace:
+        async def _rlm_run(prompt: str, **kwargs) -> str:
             cmd = ["rlm", prompt]
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -162,7 +182,7 @@ def install_shims(skills_dir: str) -> list[str]:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, _ = await proc.communicate()
-            return types.SimpleNamespace(answer=stdout.decode().strip())
+            return stdout.decode().strip()
 
         mod.run = _rlm_run
         sys.modules["rlm"] = mod
