@@ -135,12 +135,6 @@ def register_add_tool(monkeypatch):
 
 
 @pytest.fixture
-def register_add_skill(monkeypatch):
-    """Point TASK_SKILLS_DIR at the fixtures dir so ``install_shims`` registers add()."""
-    monkeypatch.setattr("rlm.tools.ipython.TASK_SKILLS_DIR", SKILL_FIXTURES_DIR)
-
-
-@pytest.fixture
 def session(tmp_path):
     return Session(tmp_path / "session")
 
@@ -150,11 +144,10 @@ def session(tmp_path):
 # Each fixture skill in ``tests/fixtures/skills/`` is editable-installed
 # once per test session (``install_fixture_skills``). That matches
 # what the environment's install script does in production: the CLI
-# lands in ``.venv/bin/<name>`` (so the kernel shim's ``shutil.which``
-# finds it) and the ``rlm-skill-<name>`` distribution is registered
-# with ``importlib.metadata``. Per-test, ``register_add_skill`` then
-# points TASK_SKILLS_DIR at the fixtures folder so ``install_shims``'
-# filesystem scan also picks the skill up at kernel startup.
+# lands in ``.venv/bin/<name>`` (so IPython's ``!<name>`` shell escape
+# finds it) and the ``rlm-skill-<name>`` distribution shows up in
+# ``importlib.metadata``, which is how ``get_installed_skills()``
+# discovers it at kernel startup.
 
 
 @pytest.fixture(scope="session", autouse=True)

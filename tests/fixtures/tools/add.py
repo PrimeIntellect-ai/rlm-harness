@@ -1,4 +1,4 @@
-"""Test-only native ``add`` tool. Registered per-test via ``register_add_ntc``."""
+"""Test-only ``add`` tool. Registered session-wide via ``register_fixture_tools``."""
 
 from __future__ import annotations
 

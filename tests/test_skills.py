@@ -19,7 +19,7 @@ from conftest import DummyClient, DummyMessage, DummyToolCall, tool_result
 from rlm.engine import RLMEngine
 
 
-async def test_valid_python_skill(session, register_add_skill):
+async def test_valid_python_skill(session):
     """Python form: ``await add(...)`` in an ipython tool call hits the real skill CLI."""
     prompt = "compute 2 + 3"
     messages = [
@@ -40,7 +40,7 @@ async def test_valid_python_skill(session, register_add_skill):
     assert result.answer == "the sum is 5"
 
 
-async def test_valid_bash_skill(session, register_add_skill):
+async def test_valid_bash_skill(session):
     """Bash form: ``!add ...`` in an ipython tool call runs the skill CLI via IPython's shell escape."""
     prompt = "compute 2 + 3"
     messages = [
