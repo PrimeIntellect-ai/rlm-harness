@@ -142,9 +142,7 @@ def _parse_summarize_at_tokens(
             f"summarize_at_tokens values must be positive (got lo={lo}, hi={hi})"
         )
     if lo > hi:
-        raise ValueError(
-            f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})"
-        )
+        raise ValueError(f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})")
     return lo, hi
 
 
@@ -441,9 +439,7 @@ class RLMEngine:
         """
         # Append the checkpoint prompt and ask the model for a summary
         # turn with NO tools available so it can only respond with text.
-        messages.append(
-            {"role": "user", "content": CHECKPOINT_COMPACTION_PROMPT}
-        )
+        messages.append({"role": "user", "content": CHECKPOINT_COMPACTION_PROMPT})
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -461,9 +457,7 @@ class RLMEngine:
         turns_since_last = turn + 1 - self._branch_start_turn
 
         system_msg = messages[0]
-        compacted_user_content = (
-            POST_COMPACTION_FRAMING + "\n\n" + summary_text
-        )
+        compacted_user_content = POST_COMPACTION_FRAMING + "\n\n" + summary_text
         messages[:] = [
             system_msg,
             {"role": "user", "content": compacted_user_content},
