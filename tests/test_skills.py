@@ -1,4 +1,4 @@
-"""Tests for programmatic tool calls (PTC): skills invoked from inside the IPython tool.
+"""Tests for skills: skills invoked from inside the IPython tool.
 
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a real
 skill fixture on PATH; the engine starts its own IPython kernel to
@@ -19,7 +19,7 @@ from conftest import DummyClient, DummyMessage, DummyToolCall, tool_result
 from rlm.engine import RLMEngine
 
 
-async def test_valid_python_ptc(register_add_ptc, session):
+async def test_valid_python_skill(session, register_add_skill):
     """Python form: ``await add(...)`` in an ipython tool call hits the real skill CLI."""
     prompt = "compute 2 + 3"
     messages = [
@@ -40,7 +40,7 @@ async def test_valid_python_ptc(register_add_ptc, session):
     assert result.answer == "the sum is 5"
 
 
-async def test_valid_bash_ptc(register_add_ptc, session):
+async def test_valid_bash_skill(session, register_add_skill):
     """Bash form: ``!add ...`` in an ipython tool call runs the skill CLI via IPython's shell escape."""
     prompt = "compute 2 + 3"
     messages = [
@@ -55,5 +55,5 @@ async def test_valid_bash_ptc(register_add_ptc, session):
 
     result = await engine.run(prompt)
 
-    assert "5" in tool_result(client)
+    assert tool_result(client).strip() == "5"
     assert result.answer == "the sum is 5"
