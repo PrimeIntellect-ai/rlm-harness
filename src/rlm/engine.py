@@ -44,6 +44,18 @@ CHECKPOINT_COMPACTION_PROMPT = (
     "seamlessly continue the work."
 )
 
+# Appended to the checkpoint prompt when the IPython REPL is active.
+# The kernel is restarted on compaction, so the next LLM inherits an
+# empty Python state — flag this so the summary captures anything the
+# next LLM would otherwise need to rebuild from scratch.
+REPL_RESTART_NOTE = (
+    "\n\n"
+    "Note: the IPython kernel will be restarted after this summary. "
+    "All Python variables, imports, loaded data, and in-memory state "
+    "will be wiped. Capture anything the next LLM needs to re-establish "
+    "(key values, file paths, loaded datasets, etc.) in the summary itself."
+)
+
 # Wrapper text that frames the summary as the sole user-facing context
 # for the post-compaction branch. The original task prompt is dropped;
 # the summary is responsible for carrying the goal.
@@ -408,7 +420,11 @@ class RLMEngine:
 
         # Append the checkpoint prompt and ask the model for a summary
         # turn with NO tools available so it can only respond with text.
-        messages.append({"role": "user", "content": CHECKPOINT_COMPACTION_PROMPT})
+        # Warn about the REPL restart only when a kernel is actually running.
+        checkpoint_prompt = CHECKPOINT_COMPACTION_PROMPT
+        if self._repl is not None:
+            checkpoint_prompt += REPL_RESTART_NOTE
+        messages.append({"role": "user", "content": checkpoint_prompt})
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
