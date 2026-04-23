@@ -7,7 +7,6 @@ the real ``kernel_shim → subprocess`` path the model takes:
 
 - python form → ``await add(...)`` dispatches through the kernel shim
 - bash form   → ``!add ...`` runs the CLI directly from PATH
-- env vars    → ``RLM_TOOL_CALL_SOURCE`` is set to ``"python"`` on the await path
 
 Skill fixtures live under ``tests/fixtures/skills/<name>/``.
 Kernel startup is ~700ms per test; keep the set here small.
@@ -21,6 +20,7 @@ from rlm.engine import RLMEngine
 
 
 async def test_valid_python_ptc(register_add_ptc, session):
+    """Python form: ``await add(...)`` in an ipython tool call hits the real skill CLI."""
     prompt = "compute 2 + 3"
     messages = [
         DummyMessage(
@@ -41,6 +41,7 @@ async def test_valid_python_ptc(register_add_ptc, session):
 
 
 async def test_valid_bash_ptc(register_add_ptc, session):
+    """Bash form: ``!add ...`` in an ipython tool call runs the skill CLI via IPython's shell escape."""
     prompt = "compute 2 + 3"
     messages = [
         DummyMessage(

@@ -17,6 +17,7 @@ from rlm.types import TokenUsage
 
 
 async def test_valid_ntc(register_add_ntc, session):
+    """Valid native tool call: engine dispatches add() and feeds the result back."""
     prompt = "add 2 and 3"
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("add", {"a": 2, "b": 3})]),
@@ -36,6 +37,7 @@ async def test_valid_ntc(register_add_ntc, session):
 
 
 async def test_invalid_ntc_args(register_add_ntc, session):
+    """Malformed JSON in a native tool call: rollout short-circuits with an error answer."""
     prompt = "add 2 and 3"
     messages = [DummyMessage(tool_calls=[DummyToolCall("add", "not-valid-json")])]
 

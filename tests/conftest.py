@@ -12,38 +12,12 @@ from typing import Any, cast
 
 import pytest
 
+from fixtures.tools.add import AddTool
+
 from rlm.session import Session
 from rlm.tools import registry as tool_registry
-from rlm.tools.base import ToolContext, ToolOutcome
 
 SKILL_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "skills"
-
-# --- Dummy tool ----------------------------------------------------------
-
-
-class AddTool:
-    name = "add"
-
-    def schema(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": "add",
-                "description": "Add two integers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "a": {"type": "integer"},
-                        "b": {"type": "integer"},
-                    },
-                    "required": ["a", "b"],
-                },
-            },
-        }
-
-    def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
-        return ToolOutcome(content=str(args["a"] + args["b"]))
-
 
 # --- Dummy message types --------------------------------------
 #
