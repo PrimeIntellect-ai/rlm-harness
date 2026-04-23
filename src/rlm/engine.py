@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import random
 import time
 from pathlib import Path
 
@@ -28,8 +27,8 @@ from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
 
 
 # Injected as a user message when the branch's context size reaches the
-# sampled compaction threshold. The model's next reply is expected to be
-# a plain-text handoff summary; any tool calls it emits are ignored and
+# compaction threshold. The model's next reply is expected to be a
+# plain-text handoff summary; any tool calls it emits are ignored and
 # the message is compacted in place of them.
 CHECKPOINT_COMPACTION_PROMPT = (
     "You are performing a CONTEXT CHECKPOINT COMPACTION. "
@@ -88,60 +87,35 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     return args, None
 
 
-def _parse_summarize_at_tokens(
-    value: int | tuple[int, int] | list[int] | str | None,
-) -> tuple[int, int] | None:
-    """Normalize ``summarize_at_tokens`` to ``(lo, hi)`` or ``None``.
+def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
+    """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
 
     Accepts:
-      - ``None`` → disabled.
-      - ``int`` → fixed threshold (lo == hi).
-      - ``(lo, hi)`` / ``[lo, hi]`` → uniform range per compaction.
-      - ``str`` (from env var) → "N" or "lo,hi".
+      - ``None`` / empty string → disabled.
+      - ``int`` → fixed threshold.
+      - ``str`` (from env var) → "N".
     """
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        raise ValueError("summarize_at_tokens must be an int")
     if isinstance(value, str):
-        parts = [p.strip() for p in value.split(",") if p.strip()]
-        if not parts:
-            return None
         try:
-            ints = [int(p) for p in parts]
+            parsed = int(value.strip())
         except ValueError as exc:
             raise ValueError(
-                f"summarize_at_tokens must be an int or 'lo,hi' string (got {value!r})"
+                f"summarize_at_tokens must be an int (got {value!r})"
             ) from exc
-        if len(ints) == 1:
-            lo = hi = ints[0]
-        elif len(ints) == 2:
-            lo, hi = ints
-        else:
-            raise ValueError(
-                f"summarize_at_tokens string must have 1 or 2 comma-separated "
-                f"ints (got {value!r})"
-            )
-    elif isinstance(value, bool):
-        raise ValueError("summarize_at_tokens must be an int or (lo, hi) tuple")
     elif isinstance(value, int):
-        lo = hi = value
-    elif isinstance(value, (tuple, list)):
-        if len(value) != 2:
-            raise ValueError(
-                f"summarize_at_tokens tuple must have 2 elements (got {value!r})"
-            )
-        lo, hi = int(value[0]), int(value[1])
+        parsed = value
     else:
         raise ValueError(
-            f"summarize_at_tokens must be int, (lo, hi), or None (got {type(value).__name__})"
+            f"summarize_at_tokens must be int or None (got {type(value).__name__})"
         )
 
-    if lo <= 0 or hi <= 0:
-        raise ValueError(
-            f"summarize_at_tokens values must be positive (got lo={lo}, hi={hi})"
-        )
-    if lo > hi:
-        raise ValueError(f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})")
-    return lo, hi
+    if parsed <= 0:
+        raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
+    return parsed
 
 
 class RLMEngine:
@@ -149,7 +123,7 @@ class RLMEngine:
         self,
         model: str | None = None,
         max_turns: int | None = None,
-        summarize_at_tokens: int | tuple[int, int] | list[int] | None = None,
+        summarize_at_tokens: int | None = None,
         system_prompt_path: str | None = None,
         append_to_system_prompt: str | None = None,
         cwd: str | None = None,
@@ -172,7 +146,7 @@ class RLMEngine:
             env_value = os.environ.get("RLM_SUMMARIZE_AT_TOKENS")
         else:
             env_value = summarize_at_tokens
-        self.summarize_at_tokens_range = _parse_summarize_at_tokens(env_value)
+        self.summarize_at_tokens = _parse_summarize_at_tokens(env_value)
 
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
@@ -201,19 +175,9 @@ class RLMEngine:
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
 
-        # Drawn at branch start and after every compaction. None if disabled.
-        self._current_summarize_threshold: int | None = self._sample_threshold()
-
         # Turn index (0-based) at the start of the current branch. Used to
         # report "turns since last compaction" when a compaction fires.
         self._branch_start_turn: int = 0
-
-    def _sample_threshold(self) -> int | None:
-        """Draw a new summarization threshold from the configured range."""
-        if self.summarize_at_tokens_range is None:
-            return None
-        lo, hi = self.summarize_at_tokens_range
-        return random.randint(lo, hi)
 
     def _ensure_session(self):
         """Create session if not set."""
@@ -397,12 +361,12 @@ class RLMEngine:
             self._detect_new_children()
 
             # Auto-compaction: if this turn's prompt_tokens reached the
-            # sampled threshold, ask the model for a handoff summary and
+            # configured threshold, ask the model for a handoff summary and
             # rebuild the branch around it. Fires at most once per loop
             # iteration; the compaction op takes its own LLM call.
             if (
-                self._current_summarize_threshold is not None
-                and usage.prompt_tokens >= self._current_summarize_threshold
+                self.summarize_at_tokens is not None
+                and usage.prompt_tokens >= self.summarize_at_tokens
             ):
                 await self._compact_branch(messages, turn)
         else:
@@ -430,10 +394,10 @@ class RLMEngine:
         """Ask the model for a handoff summary and rebuild ``messages``.
 
         Called in-place: mutates ``messages`` to ``[system, user(framing +
-        summary)]``, restarts the ipython kernel, and resamples the
-        threshold. The LLM call for the summary doesn't count toward
-        ``max_turns`` — it's housekeeping, not a work turn — but its
-        tokens land in ``_total_usage`` for cost accounting.
+        summary)]`` and restarts the ipython kernel. The LLM call for the
+        summary doesn't count toward ``max_turns`` — it's housekeeping,
+        not a work turn — but its tokens land in ``_total_usage`` for
+        cost accounting.
         """
         # Measure what's about to be dropped BEFORE appending the
         # checkpoint prompt — otherwise the prompt's own chars get
@@ -483,7 +447,7 @@ class RLMEngine:
         if self._repl is not None:
             self._repl.restart_kernel()
 
-        # Metrics: close the old branch and draw a fresh threshold.
+        # Metrics: close the old branch.
         self._metrics.record(
             CompactionApplied(
                 num_turns_dropped=turns_since_last,
@@ -494,7 +458,6 @@ class RLMEngine:
         )
         self._branch_start_turn = turn + 1
         self._metrics.turns_since_last_compaction = 0
-        self._current_summarize_threshold = self._sample_threshold()
 
     def _load_system_prompt(
         self, messages_path: str, active_tools: list[BuiltinTool]
