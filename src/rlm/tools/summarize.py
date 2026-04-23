@@ -93,13 +93,6 @@ class SummarizeTool:
             schema["function"]["description"] = _SUMMARIZE_DESCRIPTION_BASE
         return schema
 
-    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
-        # Only mention summarize when there's a concrete limit to stay within;
-        # otherwise the tool is present but unmotivated.
-        if max_turns_in_context is None:
-            return []
-        return ["Use `summarize` to drop older turns and stay within this limit."]
-
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         state = context.state.setdefault("summarize", SummarizeState())
         if not isinstance(state, SummarizeState):

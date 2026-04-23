@@ -61,9 +61,6 @@ class BashTool:
         )
         return schema
 
-    def prompt_lines(self, *, max_turns_in_context: int | None) -> list[str]:
-        return ["Use `bash` to run shell commands. Each call is stateless."]
-
     def execute(self, args: dict[str, Any], context: ToolContext) -> ToolOutcome:
         command = args.get("command", "")
         if not isinstance(command, str):
