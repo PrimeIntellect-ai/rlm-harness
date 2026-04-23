@@ -437,6 +437,13 @@ class RLMEngine:
         ``max_turns`` — it's housekeeping, not a work turn — but its
         tokens land in ``_total_usage`` for cost accounting.
         """
+        # Measure what's about to be dropped BEFORE appending the
+        # checkpoint prompt — otherwise the prompt's own chars get
+        # counted as "dropped conversation content", inflating the
+        # metric and the session log's dropped_chars field.
+        dropped_chars = _count_messages_chars(messages[2:])
+        turns_since_last = turn + 1 - self._branch_start_turn
+
         # Append the checkpoint prompt and ask the model for a summary
         # turn with NO tools available so it can only respond with text.
         messages.append({"role": "user", "content": CHECKPOINT_COMPACTION_PROMPT})
@@ -449,12 +456,6 @@ class RLMEngine:
         self._total_usage.completion_tokens += usage.completion_tokens
 
         summary_text = response.choices[0].message.content or ""
-
-        # Measure what's about to be dropped (everything after the initial
-        # system+user pair). Counts chars on the retained message list
-        # since that's what will actually disappear from context.
-        dropped_chars = _count_messages_chars(messages[2:])
-        turns_since_last = turn + 1 - self._branch_start_turn
 
         system_msg = messages[0]
         compacted_user_content = POST_COMPACTION_FRAMING + "\n\n" + summary_text
