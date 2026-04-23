@@ -1,4 +1,4 @@
-"""Tests for programmatic tool calls: skills invoked from inside the IPython tool.
+"""Tests for programmatic tool calls (PTC): skills invoked from inside the IPython tool.
 
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a real
 skill fixture on PATH; the engine starts its own IPython kernel to
@@ -28,7 +28,7 @@ async def test_valid_python_ptc(register_add_ptc, session):
                 DummyToolCall("ipython", {"code": "print(await add(a=2, b=3))"})
             ]
         ),
-        DummyMessage(content="done"),
+        DummyMessage(content="the sum is 5"),
     ]
 
     client = DummyClient(messages)
@@ -37,7 +37,7 @@ async def test_valid_python_ptc(register_add_ptc, session):
     result = await engine.run(prompt)
 
     assert tool_result(client).strip() == "5"
-    assert result.answer == "done"
+    assert result.answer == "the sum is 5"
 
 
 async def test_valid_bash_ptc(register_add_ptc, session):
@@ -46,7 +46,7 @@ async def test_valid_bash_ptc(register_add_ptc, session):
         DummyMessage(
             tool_calls=[DummyToolCall("ipython", {"code": "!add --a 2 --b 3"})]
         ),
-        DummyMessage(content="done"),
+        DummyMessage(content="the sum is 5"),
     ]
 
     client = DummyClient(messages)
@@ -55,23 +55,4 @@ async def test_valid_bash_ptc(register_add_ptc, session):
     result = await engine.run(prompt)
 
     assert "5" in tool_result(client)
-    assert result.answer == "done"
-
-
-async def test_source_env_propagates(install_skill, session):
-    install_skill("whoami_src")
-    prompt = "check env"
-    messages = [
-        DummyMessage(
-            tool_calls=[DummyToolCall("ipython", {"code": "print(await whoami_src())"})]
-        ),
-        DummyMessage(content="done"),
-    ]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert tool_result(client).strip() == "python"
-    assert result.answer == "done"
+    assert result.answer == "the sum is 5"

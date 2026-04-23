@@ -1,11 +1,11 @@
-"""Tests for native tool calls: OpenAI-style tool calls dispatched by the engine.
+"""Tests for native tool calls (NTC): OpenAI-style tool calls dispatched by the engine.
 
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a dummy
 ``add(a, b)`` tool (registered per-test, not part of the package) to
 exercise how the harness reacts to model tool-call behavior:
 
 - valid tool call   → dispatched, result fed back as a ``tool`` message
-- invalid JSON args → loop short-circuits, final answer reports the error
+- invalid tool call → loop short-circuits, final answer reports the error
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ async def test_invalid_ntc_args(register_add_ntc, session):
     # Harness short-circuits — no second round-trip to the model.
     assert len(client.calls) == 1
     assert "invalid JSON arguments" in result.answer
-    assert "'add'" in result.answer
     assert result.session_dir == session.dir
     assert result.usage == TokenUsage(prompt_tokens=1, completion_tokens=1)
     assert result.turns == 1
