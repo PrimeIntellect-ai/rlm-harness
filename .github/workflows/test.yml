@@ -1,4 +1,4 @@
-name: Tests
+name: Test
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    name: Pytest
+    name: RLM
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
