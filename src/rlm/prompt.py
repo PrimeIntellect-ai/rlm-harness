@@ -31,6 +31,7 @@ def build_system_prompt(
         "Work one step at a time: execute code, read the output, then decide your next step.",
         "When you are done, stop calling tools and state your final answer.",
         f"Working directory: {cwd}",
+        "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
         "",
         f"Your conversation is logged to {messages_path}.",
     ]
