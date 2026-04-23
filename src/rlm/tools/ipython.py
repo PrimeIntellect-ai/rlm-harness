@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import os
-from pathlib import Path
 from queue import Empty
 import re
 import sys
@@ -13,7 +12,6 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
-from rlm.tools.skills import TASK_SKILLS_DIR
 from rlm.types import IpythonExecuted
 
 if TYPE_CHECKING:
@@ -129,10 +127,9 @@ class IPythonREPL:
         """Start the IPython kernel."""
         from jupyter_client import KernelManager
 
-        kernel_python = os.environ.get("RLM_KERNEL_PYTHON") or sys.executable
         self._km = KernelManager()
         self._km.kernel_spec.argv = [
-            kernel_python,
+            sys.executable,
             "-m",
             "ipykernel_launcher",
             "-f",
@@ -145,44 +142,18 @@ class IPythonREPL:
         self._inject_startup()
 
     def _inject_startup(self):
-        """Set up kernel: cwd, nest_asyncio, env vars, skill shims."""
+        """Set up kernel: cwd, env vars, nest_asyncio."""
         session_dir = str(self.session.dir) if self.session else None
         depth = int(os.environ.get("RLM_DEPTH", "0"))
-        max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
-        allow_recursion = depth < max_depth
-        shim_file = str(Path(__file__).resolve().parent.parent / "kernel_shim.py")
-        skills_dir = str(TASK_SKILLS_DIR)
 
         setup_code = f"""\
-import os, sys
+import os
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 
 import nest_asyncio
 nest_asyncio.apply()
-
-import asyncio
-
-# Install skill shims so `import edit`, `import rlm` etc. work
-# even when the kernel runs in a different Python.  Load kernel_shim
-# directly by path to avoid triggering rlm's __init__ (which needs openai).
-import importlib.util as _ilu
-_spec = _ilu.spec_from_file_location("kernel_shim", {shim_file!r})
-_shim = _ilu.module_from_spec(_spec)
-_spec.loader.exec_module(_shim)
-_shimmed = _shim.install_shims({skills_dir!r})
-
-# Pre-import each shimmed name into the kernel's user namespace so the
-# model can call skills directly (`await edit(...)`) without writing
-# `import edit` every turn. `rlm` is gated on recursion being allowed;
-# without the gate it would appear in globals in non-recursive envs,
-# which is confusing (the prompt doesn't advertise it there).
-_allow_recursion = {allow_recursion!r}
-for _name in _shimmed:
-    if _name == "rlm" and not _allow_recursion:
-        continue
-    globals()[_name] = sys.modules[_name]
 """
         self._execute_silent(setup_code)
 
