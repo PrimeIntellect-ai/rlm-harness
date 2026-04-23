@@ -13,8 +13,6 @@ class ToolOutcome:
     """Result of executing a builtin tool."""
 
     content: str
-    drop_turns: int = 0
-    flush_repl_state: bool = False
     metric_events: list[BuiltinMetricEvent] = field(default_factory=list)
 
 

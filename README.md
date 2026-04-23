@@ -168,33 +168,11 @@ Dependencies go in the skill's own `pyproject.toml`. Version conflicts between s
 
 For running `rlm` against a specific skill set outside of a sandbox-orchestrated environment, create a `/task/rlm-skills/` directory (or bind-mount one) and place skill packages there before running `install.sh`. The rlm repo ships no skills by default; look at the `rlm-swe` or `rlm-deepdive` environments for working skill packages to copy.
 
-## Kernel Modes
+## Kernel
 
-The IPython kernel can run in two modes depending on the environment.
+The IPython kernel always runs in rlm's own Python (`sys.executable`). `install.sh` puts `rlm` and all discovered skills into the same `uv tool install` environment, so `from rlm import run`, `import edit`, etc. work natively from inside an IPython cell.
 
-### Native kernel (default)
-
-The kernel runs inside rlm's own Python. All skills and the `rlm` module are importable natively. This is the default when `RLM_KERNEL_PYTHON` is unset.
-
-Use this for non-Python projects (Go, Java, Rust) or when the sandbox has no `.venv`.
-
-### External kernel (`RLM_KERNEL_PYTHON`)
-
-Set `RLM_KERNEL_PYTHON` to point the kernel at a different Python interpreter — typically the sandbox's `.venv/bin/python3`. The kernel then runs inside the sandbox's Python with access to all its packages (numpy, pandas, etc.) for inline imports. The target Python must have `ipykernel` and `nest_asyncio` installed.
-
-In training, the verifiers harness detects the sandbox `.venv`, installs `ipykernel`, and sets `RLM_KERNEL_PYTHON` automatically. For manual use:
-
-```bash
-export RLM_KERNEL_PYTHON=$(pwd)/.venv/bin/python3
-rlm "fix the failing test"
-```
-
-Lightweight proxy modules are always registered at kernel startup, guaranteeing the kernel uses the uploaded skills at `/task/rlm-skills` rather than any same-named packages in the sandbox. The proxies provide the same API (`import edit`, `edit.PARAMETERS`, `await edit.run(...)`) but delegate to the skill CLIs on PATH via subprocess.
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RLM_KERNEL_PYTHON` | `sys.executable` | Python interpreter for the IPython kernel |
-| `RLM_CHECKOUT_PATH` | `/tmp/rlm-checkout` | Path to the rlm source checkout |
+To exercise packages from the target project's `.venv` (e.g. running its test suite), shell out from an IPython cell: `!./.venv/bin/python3 -m pytest`. The kernel itself stays isolated from whatever project venv the agent is working on — no cross-cell state involving sandbox packages.
 
 ## Developing
 
