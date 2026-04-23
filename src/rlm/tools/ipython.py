@@ -179,8 +179,7 @@ for _name in {installed_skills!r}:
     globals()[_name] = _wrap_callable(__import__(_name))
 
 if {allow_recursion!r}:
-    import rlm
-    globals()['rlm'] = rlm
+    globals()['rlm'] = _wrap_callable(__import__('rlm'))
 """
         self._execute_silent(setup_code)
 

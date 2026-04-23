@@ -71,8 +71,8 @@ def build_system_prompt(
         parts.extend(
             [
                 "",
-                "The `rlm` module is pre-imported. `await rlm.run('sub-task')` spawns a recursive sub-agent and returns an `RLMResult` with `.answer` (string), `.usage`, `.turns`, and `.session_dir`.",
-                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm.run('task1'), rlm.run('task2'))`.",
+                "The `rlm` module is pre-imported. `await rlm('sub-task')` spawns a recursive sub-agent and returns an `RLMResult` with `.answer` (string), `.usage`, `.turns`, and `.session_dir`.",
+                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
             ]
         )
 
