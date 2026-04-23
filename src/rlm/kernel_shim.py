@@ -1,11 +1,22 @@
 """Skill shims for external ipython kernels.
 
-Registers lightweight proxy modules so that ``import edit``,
-``edit.PARAMETERS``, and ``await edit.run(...)`` work in the ipython
-kernel — delegating to the skill CLIs on PATH via subprocess.
+Registers modules so that ``import edit``, ``edit.PARAMETERS``, and
+``await edit.run(...)`` work in the ipython kernel. Two dispatch paths:
 
-Shims are always installed regardless of whether a same-named module
-exists, guaranteeing the kernel uses the uploaded skills.
+* **In-process** — preferred. If the skill is importable from the
+  kernel's Python (i.e. it lives in the same venv as rlm, which is the
+  default layout produced by ``install.sh``), the real module is
+  registered directly. ``await edit.run(**kwargs)`` then calls the
+  skill's Python function with no process boundary: kwargs stay typed,
+  exceptions surface as native Python exceptions with real tracebacks,
+  and return values travel as native objects.
+* **Subprocess** — fallback for skills installed in an isolated venv
+  (not importable from the kernel). A proxy module shells out to the
+  skill's CLI on PATH, translating kwargs to ``--flag value`` pairs.
+
+The in-process path only wins when the importable module resolves to a
+file under the skill's own ``src/`` directory — that guards against a
+same-named PyPI package on ``sys.path`` shadowing the skill.
 
 Usage (called from _inject_startup)::
 
@@ -17,6 +28,8 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import importlib
+import importlib.util
 import os
 import shutil
 import sys
@@ -79,7 +92,7 @@ def _make_run(cli_name: str):
 
 
 def _make_proxy(name: str, parameters: dict) -> types.ModuleType:
-    """Create a proxy module for a skill."""
+    """Create a subprocess-dispatched proxy module for a skill."""
     mod = types.ModuleType(name)
     mod.__doc__ = f"Proxy for the {name} skill (delegates to CLI)."
     mod.__path__ = []  # make it look like a package
@@ -88,14 +101,43 @@ def _make_proxy(name: str, parameters: dict) -> types.ModuleType:
     return mod
 
 
+def _import_skill_module(skill_dir: Path, name: str) -> types.ModuleType | None:
+    """Import *name* only if it resolves to a file under ``skill_dir/src``.
+
+    Guards against a same-named PyPI package on ``sys.path`` shadowing
+    the skill: if the importable module lives somewhere else, we refuse
+    and let the caller fall back to the subprocess proxy.
+    """
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, ValueError):
+        return None
+    if spec is None or spec.origin is None:
+        return None
+    try:
+        origin = Path(spec.origin).resolve()
+        src_root = (skill_dir / "src").resolve()
+    except OSError:
+        return None
+    if not origin.is_relative_to(src_root):
+        return None
+    try:
+        return importlib.import_module(name)
+    except Exception:
+        return None
+
+
 def install_shims(skills_dir: str) -> list[str]:
-    """Register proxy modules for all skills found in *skills_dir*.
+    """Register modules for all skills found in *skills_dir*.
 
-    Always installs shims regardless of whether a same-named module is
-    already importable — this guarantees the kernel uses the rlm
-    checkout's version of each skill, not an unrelated package.
+    Prefers in-process import when the skill resolves to a file under
+    its own ``src/`` directory — this gives the kernel native Python
+    semantics (typed kwargs, real exceptions, native return values)
+    instead of the subprocess/CLI boundary. Falls back to the
+    subprocess CLI proxy when the skill isn't importable from the
+    kernel's Python (e.g. it's in an isolated venv).
 
-    Returns the list of skill names that were shimmed.
+    Returns the list of skill names that were registered.
     """
     skills_path = Path(skills_dir)
     if not skills_path.is_dir():
@@ -116,7 +158,13 @@ def install_shims(skills_dir: str) -> list[str]:
         else:
             continue
 
-        # Skip if the CLI isn't on PATH
+        real_mod = _import_skill_module(skill_dir, name)
+        if real_mod is not None and callable(getattr(real_mod, "run", None)):
+            sys.modules[name] = real_mod
+            shimmed.append(name)
+            continue
+
+        # Subprocess fallback — skill is not importable from the kernel.
         if not shutil.which(name):
             continue
 
