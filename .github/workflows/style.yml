@@ -1,0 +1,21 @@
+name: Style
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Lint
+        uses: astral-sh/ruff-action@v3
+      - name: Format
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check"
