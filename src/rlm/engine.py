@@ -68,25 +68,29 @@ POST_COMPACTION_FRAMING = (
 )
 
 # Replaces a tool result whose presence in context pushed prompt_tokens
-# past max_context_tokens. Stays intentionally short so the rolled-back
-# conversation fits in whatever budget remains; the tool_call that
-# produced it stays intact on the assistant message above, so the model
-# can see what it intended to do.
+# past max_context_tokens. The tool WAS executed — real-world side
+# effects (filesystem writes, web calls) already happened — but its
+# output is being dropped so the rolled-back conversation fits in the
+# remaining budget.
 OVERSHOT_TOOL_RESULT_STUB = (
     "[tool output dropped: the result would have pushed the conversation "
-    "past the context-token budget. The tool call above was not applied.]"
+    "past the context-token budget. The tool ran but its output is not "
+    "visible.]"
+)
+
+# Written in place of a real tool result when soft compaction fires on
+# a turn whose assistant response had a tool_call. The tool was NOT
+# executed; we're compacting before running it. Preserves the model's
+# intent in the summary ("I was about to call X; my call was deferred").
+SOFT_COMPACT_SKIPPED_STUB = (
+    "[tool call skipped: the context-compaction threshold was reached "
+    "before this tool ran. It was not executed.]"
 )
 
 # Safety cushion subtracted from remaining-budget when computing
 # max_completion_tokens. Accounts for small provider bookkeeping drift
 # between our prompt_tokens accounting and whatever the server measures.
 _BUDGET_MARGIN_TOKENS = 128
-
-# Max times _compact_branch will roll back a fat tool result and retry
-# its own call when the compaction prompt overshoots max_context_tokens.
-# In practice one rollback suffices; the cap is a safety valve for
-# pathological shapes.
-_MAX_COMPACTION_ROLLBACK_RETRIES = 3
 
 
 def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
@@ -466,6 +470,40 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
+            # Soft compaction: the model wants to continue (it has a
+            # tool_call) but this turn's prompt_tokens reached the
+            # threshold. Don't execute the tool; instead append a skip
+            # stub as the tool result so the model's intent is
+            # preserved in what compaction summarizes, then compact.
+            # Checks here — before tool execution — so the compaction
+            # call runs on messages that are still ≈ prompt_tokens + a
+            # small stub, guaranteeing it fits under the ceiling. Done
+            # responses (above) skip this path, so a final-answer turn
+            # is never wasted by soft compaction.
+            if (
+                self.summarize_at_tokens is not None
+                and usage.prompt_tokens >= self.summarize_at_tokens
+            ):
+                tc = msg.tool_calls[0]
+                self.session.log_tool_result(
+                    turn, tc.function.name, SOFT_COMPACT_SKIPPED_STUB, 0.0
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": SOFT_COMPACT_SKIPPED_STUB,
+                    }
+                )
+                compact_ok = await self._compact_branch(messages, turn)
+                if not compact_ok:
+                    final_text = (
+                        f"[compaction call exceeded max_context_tokens "
+                        f"({self.max_context_tokens})]"
+                    )
+                    break
+                continue
+
             # Execute the single allowed tool call (reuse parsed args from above;
             # parse failures have already broken the loop, so parsed_args[0] is
             # guaranteed to be a dict here).
@@ -500,22 +538,6 @@ class RLMEngine:
 
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
-
-            # Auto-compaction: if this turn's prompt_tokens reached the
-            # configured threshold, ask the model for a handoff summary and
-            # rebuild the branch around it. Fires at most once per loop
-            # iteration; the compaction op takes its own LLM call.
-            if (
-                self.summarize_at_tokens is not None
-                and usage.prompt_tokens >= self.summarize_at_tokens
-            ):
-                compact_ok = await self._compact_branch(messages, turn)
-                if not compact_ok:
-                    final_text = (
-                        f"[compaction call exceeded max_context_tokens "
-                        f"({self.max_context_tokens})]"
-                    )
-                    break
         else:
             self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"
@@ -546,92 +568,56 @@ class RLMEngine:
         not a work turn — but its tokens land in ``_total_usage`` for
         cost accounting.
 
-        When the compaction call itself overshoots ``max_context_tokens``
-        — usually because soft compaction fires off the previous turn's
-        stale ``prompt_tokens`` just after a fat tool result was
-        appended — the most recent non-stub tool result is rolled back
-        to the stub and the call is retried. This mirrors the
-        normal-turn overshoot path, so soft compaction no longer
-        preempts the rollback-based recovery flow.
+        Callers run this on ``messages`` that should already fit under
+        the ceiling:
 
-        Returns ``True`` on success. Returns ``False`` (and sets
-        ``stop_reason = "context_budget_exceeded"``) when the call
-        still overshoots after every available tool result has been
-        rolled back, or when the retry budget is exhausted. Caller
-        should break out of the run loop.
+        - Hard path: the triggering response was discarded and the
+          fat tool result is already rolled back to the overshot stub.
+        - Soft path: the check fires on pre-append ``usage.prompt_tokens``
+          that's below the ceiling; the just-appended assistant + skip
+          stub add only a couple hundred tokens.
+
+        So the compaction call normally fits. Returns ``False`` (and
+        sets ``stop_reason = "context_budget_exceeded"``) only in the
+        pathological case where it overshoots anyway — e.g. system +
+        initial user prompt alone exceed the ceiling. Caller should
+        break out of the run loop.
         """
+        # Measure what's about to be dropped BEFORE appending the
+        # checkpoint prompt — otherwise the prompt's own chars get
+        # counted as "dropped conversation content", inflating the
+        # metric and the session log's dropped_chars field.
+        dropped_chars = _count_messages_chars(messages[2:])
         turns_since_last = turn + 1 - self._branch_start_turn
 
-        # Build the checkpoint prompt once; appended fresh on each retry.
-        # Warn about REPL restart only when a kernel is actually running.
+        # Append the checkpoint prompt and ask the model for a summary
+        # turn with NO tools available so it can only respond with text.
+        # Warn about the REPL restart only when a kernel is actually running.
         checkpoint_prompt = CHECKPOINT_COMPACTION_PROMPT
         if self._repl is not None:
             checkpoint_prompt += REPL_RESTART_NOTE
+        messages.append({"role": "user", "content": checkpoint_prompt})
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            **self._completion_budget_kwargs(),
+        )
+        usage = extract_usage(response)
+        self._total_usage.prompt_tokens += usage.prompt_tokens
+        self._total_usage.completion_tokens += usage.completion_tokens
+        self._last_prompt_tokens = usage.prompt_tokens
 
-        # Try the compaction call; on overshoot, roll back a fat tool
-        # result and retry on the smaller messages list.
-        response = None
-        usage = None
-        for _ in range(_MAX_COMPACTION_ROLLBACK_RETRIES + 1):
-            messages.append({"role": "user", "content": checkpoint_prompt})
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                **self._completion_budget_kwargs(),
-            )
-            usage = extract_usage(response)
-            self._total_usage.prompt_tokens += usage.prompt_tokens
-            self._total_usage.completion_tokens += usage.completion_tokens
-            self._last_prompt_tokens = usage.prompt_tokens
-
-            if not self._is_overshoot(usage.prompt_tokens):
-                break
-
-            # Overshot. Pop the checkpoint we just appended, try to roll
-            # back a fat tool result, then retry. The assert guards
-            # against future edits that might append something else in
-            # this loop body.
-            assert messages[-1].get("content") == checkpoint_prompt
-            messages.pop()
-            rolled_back = self._rollback_last_tool_result(messages)
-            if not rolled_back:
-                self._metrics.stop_reason = "context_budget_exceeded"
-                self.session.log(
-                    {
-                        "type": "compaction_overshot",
-                        "turn": turn,
-                        "prompt_tokens": usage.prompt_tokens,
-                        "max_context_tokens": self.max_context_tokens,
-                    }
-                )
-                return False
-            self._metrics.note_overshoot_rollback()
-            self.session.log(
-                {
-                    "type": "overshoot_rollback",
-                    "turn": turn,
-                    "prompt_tokens": usage.prompt_tokens,
-                    "max_context_tokens": self.max_context_tokens,
-                }
-            )
-        else:
-            # Retries exhausted without ever fitting under the ceiling.
+        if self._is_overshoot(usage.prompt_tokens):
             self._metrics.stop_reason = "context_budget_exceeded"
             self.session.log(
                 {
                     "type": "compaction_overshot",
                     "turn": turn,
-                    "prompt_tokens": usage.prompt_tokens if usage else None,
+                    "prompt_tokens": usage.prompt_tokens,
                     "max_context_tokens": self.max_context_tokens,
                 }
             )
             return False
-
-        # Measure what's about to be dropped AFTER retries: rollbacks
-        # already consumed whatever fat tool results triggered them
-        # (they're stubs now). The checkpoint at messages[-1] is
-        # infrastructure, not conversation content — exclude it.
-        dropped_chars = _count_messages_chars(messages[2:-1])
 
         summary_text = response.choices[0].message.content or ""
 

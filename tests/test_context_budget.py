@@ -5,8 +5,11 @@ is set explicitly, so we can verify:
 
 - the engine passes ``max_completion_tokens`` derived from remaining budget
 - an overshoot on a normal turn rolls back the last tool result and fires
-  compaction, discarding the overshot response
-- an overshoot on the compaction call itself is terminal
+  compaction, discarding the overshot response (hard path)
+- soft compaction fires on a tool_call turn before execution: the tool
+  is not run, a skip stub replaces the would-be tool result, and
+  compaction runs on messages that fit under the ceiling by construction
+- compaction-call overshoot terminates cleanly
   (``stop_reason = "context_budget_exceeded"``)
 - with no ceiling set, none of the above happens (huge ``prompt_tokens``
   just pass through)
@@ -25,6 +28,7 @@ from conftest import (
 from rlm.engine import (
     OVERSHOT_TOOL_RESULT_STUB,
     POST_COMPACTION_FRAMING,
+    SOFT_COMPACT_SKIPPED_STUB,
     _BUDGET_MARGIN_TOKENS,
     RLMEngine,
 )
@@ -161,41 +165,31 @@ async def test_overshoot_with_nothing_to_roll_back_is_terminal(session, no_tools
     assert "no tool result to roll back" in result.answer
 
 
-async def test_compaction_call_overshoot_recovers_via_rollback(
-    session, register_add_tool
-):
-    """Soft compaction's own call overshoots → internal rollback + retry succeeds.
+async def test_soft_compaction_skips_tool_and_compacts(session, register_add_tool):
+    """Soft threshold crossed + tool_call present → tool is NOT run; stub + compact.
 
-    The ``summarize_at_tokens`` check uses the *previous* call's
-    ``prompt_tokens`` (stale: it doesn't reflect the current turn's
-    assistant + tool_result). When a fat tool_result lands between
-    turns, soft compaction can fire with a ``messages`` list already
-    past ``max_context_tokens``. Before the fix, that terminated the
-    rollout; now ``_compact_branch`` rolls the tool_result back to the
-    stub and retries its own call.
+    The model's assistant message (with its tool_call) is preserved, but
+    instead of executing the tool we append SOFT_COMPACT_SKIPPED_STUB as
+    the tool result. Compaction runs on those messages (prompt ≈
+    usage.prompt_tokens + small), guaranteed to fit under the ceiling.
+    The loop continues on the compacted state.
     """
     messages = [
-        # T1: model calls a tool. Prompt small.
+        # T1: small call, tool executes normally (add returns "5").
         DummyMessage(
-            tool_calls=[DummyToolCall("add", {"a": 1, "b": 2}, id="call_a")],
+            tool_calls=[DummyToolCall("add", {"a": 2, "b": 3}, id="call_a")],
             usage=DummyUsage(prompt_tokens=200, completion_tokens=30),
         ),
-        # T2: second tool call. prompt_tokens=4500 crosses summarize_at
-        # (4000) but not max_context (10000). No overshoot yet, so the
-        # normal turn runs to completion and then soft compaction fires
-        # on the stale 4500 value.
+        # T2: prompt_tokens crosses summarize_at (4000) but NOT
+        # max_context (10000). Response has a tool_call. Soft path
+        # fires BEFORE running the tool: stub is appended, compaction
+        # fires.
         DummyMessage(
-            tool_calls=[DummyToolCall("add", {"a": 2, "b": 3}, id="call_b")],
-            usage=DummyUsage(prompt_tokens=4500, completion_tokens=30),
+            tool_calls=[DummyToolCall("add", {"a": 4, "b": 5}, id="call_b")],
+            usage=DummyUsage(prompt_tokens=4_500, completion_tokens=30),
         ),
-        # Compaction call #1: after the fat(-ish) tool result from T2
-        # was appended, the actual prompt overshoots.
-        DummyMessage(
-            content="never used",
-            usage=DummyUsage(prompt_tokens=11_000, completion_tokens=10),
-        ),
-        # Compaction call #2: retried after rolling back T2's
-        # tool_result to the stub. Fits.
+        # Compaction call: fits by construction (no fat tool_result in
+        # messages because the tool was never run).
         DummyMessage(
             content="handoff summary",
             usage=DummyUsage(prompt_tokens=800, completion_tokens=30),
@@ -216,17 +210,51 @@ async def test_compaction_call_overshoot_recovers_via_rollback(
 
     result = await engine.run("do the thing")
 
-    # Compaction eventually succeeded after one internal rollback retry.
     assert engine._metrics.compactions_count == 1
-    assert engine._metrics.overshoot_rollbacks == 1
+    assert engine._metrics.overshoot_rollbacks == 0  # soft path doesn't roll back
     assert engine._metrics.stop_reason == "done"
     assert result.answer == "final answer"
 
-    # Compaction retry (call index 3) should have seen the rolled-back stub.
-    retry_call_msgs = client.calls[3]["messages"]
-    tool_msgs = [m for m in retry_call_msgs if m.get("role") == "tool"]
-    # T2's tool result (the most recent) is the one that got rolled back.
-    assert any(m["content"] == OVERSHOT_TOOL_RESULT_STUB for m in tool_msgs)
+    # Compaction call (index 2) should have seen the skip stub as T2's tool result.
+    compaction_msgs = client.calls[2]["messages"]
+    tool_msgs = [m for m in compaction_msgs if m.get("role") == "tool"]
+    assert any(m["content"] == SOFT_COMPACT_SKIPPED_STUB for m in tool_msgs)
+    # T1's real tool result ("5") is still there at this point — only
+    # T2's would-be result is the stub.
+    assert any(m["content"] == "5" for m in tool_msgs)
+    # The real `add` tool got called only once (for T1), not twice.
+    assert engine._metrics._ipython_call_count == 0  # no ipython — we only ran add
+
+
+async def test_soft_compaction_skips_on_done_response_is_unreachable(
+    session, register_add_tool
+):
+    """Done responses (no tool_call) can't trigger soft compaction.
+
+    Even if prompt_tokens >= summarize_at_tokens, a response without
+    tool_calls ends the rollout with ``stop_reason = "done"``; soft
+    compaction's placement after the done-check means it's never
+    reached. Protects final answers from being discarded.
+    """
+    messages = [
+        DummyMessage(
+            content="final answer",
+            usage=DummyUsage(prompt_tokens=5_000, completion_tokens=10),
+        ),
+    ]
+    client = DummyClient(messages)
+    engine = RLMEngine(
+        client=client,  # type: ignore[arg-type]
+        session=session,
+        summarize_at_tokens=4_000,
+        max_context_tokens=10_000,
+    )
+
+    result = await engine.run("easy")
+
+    assert engine._metrics.stop_reason == "done"
+    assert engine._metrics.compactions_count == 0
+    assert result.answer == "final answer"
 
 
 async def test_compaction_call_overshoot_is_terminal(session, register_add_tool):
