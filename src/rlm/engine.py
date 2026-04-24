@@ -628,6 +628,16 @@ class RLMEngine:
             {"role": "user", "content": compacted_user_content},
         ]
 
+        # Reset the prompt-tokens tracker: the compaction call's
+        # prompt_tokens reflected the pre-compaction bloated messages,
+        # but we've just replaced them with [system, user(summary)].
+        # Leaving the old value would under-cap max_completion_tokens
+        # on the next turn (remaining budget = max_context - stale_big
+        # - margin → tiny). Resetting to 0 gives the next turn the
+        # full budget; the response comes back with an honest
+        # prompt_tokens that fixes the tracker for turns after.
+        self._last_prompt_tokens = 0
+
         # Log the compaction for traceability.
         self.session.log(
             {
