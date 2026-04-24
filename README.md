@@ -120,11 +120,10 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 From IPython, import a skill and call its async `run(...)` entrypoint:
 
 ```python
-import asyncio
 import websearch
 
-print(websearch.PARAMETERS)
-results = asyncio.run(websearch.run(queries=["latest jupyter_client release"]))
+help(websearch)  # signature + docstring
+results = await websearch(queries=["latest jupyter_client release"])
 ```
 
 From the shell, invoke the same skill by command name:
@@ -149,9 +148,16 @@ A skill is a normal Python package laid out like this:
 
 Required public surface:
 
-- `PARAMETERS`: JSON-schema-like description of the inputs
-- async `run(...)`: programmatic entrypoint
-- `main()`: CLI entrypoint
+- async `run(...)`: the single entrypoint. Type-annotated parameters and a Google-style docstring (`Args:`, `Returns:`) drive both the Python API and the CLI.
+
+The `pyproject.toml` points its console script at the shared CLI entry:
+
+```toml
+[project.scripts]
+<name> = "rlm.skill:cli"
+```
+
+`rlm.skill:cli` reads `sys.argv[0]`, imports the matching module, and uses [tyro](https://brentyi.github.io/tyro/) to build the argparse CLI from `run`'s signature. The return value of `run` is printed; a raise surfaces as a normal Python traceback.
 
 Naming expectations (all match):
 
@@ -160,9 +166,9 @@ Naming expectations (all match):
 - import name: `<name>`
 - console script name: `<name>`
 
-Keyword arguments on `run(...)`, keys under `PARAMETERS["properties"]`, and CLI flags should all line up. For example, if the Python API uses `queries=[...]`, `PARAMETERS` should expose `queries` and the CLI should use `--queries`.
+Keyword arguments on `run(...)` and CLI flags line up automatically — `queries: list[str]` becomes `--queries` on the CLI.
 
-Dependencies go in the skill's own `pyproject.toml`. Version conflicts between skills installed side-by-side are the user's responsibility.
+Dependencies go in the skill's own `pyproject.toml`; declare `rlm` there so the shared CLI entry resolves. Version conflicts between skills installed side-by-side are the user's responsibility.
 
 ### Local development
 
