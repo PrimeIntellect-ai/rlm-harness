@@ -178,6 +178,9 @@ class RLMMetrics:
     compaction_chars_dropped_mean: float = 0.0
     compaction_summary_chars_mean: float = 0.0
 
+    # Number of tool-result rollbacks triggered by max_context_tokens overshoots.
+    overshoot_rollbacks: int = 0
+
     # IPython input size metrics
     ipython_input_chars_mean: float = 0.0
     ipython_input_loc_mean: float = 0.0
@@ -212,7 +215,7 @@ class RLMMetrics:
     sub_rlm_programmatic_tool_calls_python: int = 0
     sub_rlm_programmatic_tool_calls_bash: int = 0
 
-    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "depth_limit"
+    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "depth_limit", "context_budget_exceeded"
 
     @property
     def turns(self) -> int:
@@ -259,6 +262,10 @@ class RLMMetrics:
         self._current_branch_input_tokens = visible_input_tokens
         self._current_branch_output_tokens = visible_output_tokens
         self._refresh_derived_metrics()
+
+    def note_overshoot_rollback(self) -> None:
+        """Record a context-budget overshoot that triggered a tool-result rollback."""
+        self.overshoot_rollbacks += 1
 
     def finalize_current_branch(self) -> None:
         if (

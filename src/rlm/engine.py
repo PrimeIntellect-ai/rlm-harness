@@ -67,6 +67,21 @@ POST_COMPACTION_FRAMING = (
     "information in this summary to assist with your own analysis:"
 )
 
+# Replaces a tool result whose presence in context pushed prompt_tokens
+# past max_context_tokens. Stays intentionally short so the rolled-back
+# conversation fits in whatever budget remains; the tool_call that
+# produced it stays intact on the assistant message above, so the model
+# can see what it intended to do.
+OVERSHOT_TOOL_RESULT_STUB = (
+    "[tool output dropped: the result would have pushed the conversation "
+    "past the context-token budget. The tool call above was not applied.]"
+)
+
+# Safety cushion subtracted from remaining-budget when computing
+# max_completion_tokens. Accounts for small provider bookkeeping drift
+# between our prompt_tokens accounting and whatever the server measures.
+_BUDGET_MARGIN_TOKENS = 128
+
 
 def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     """Parse a tool-call arguments blob. Returns (args, error_info).
@@ -99,35 +114,42 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     return args, None
 
 
-def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
-    """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
+def _parse_positive_int(name: str, value: int | str | None) -> int | None:
+    """Normalize a positive-int config value to ``int`` or ``None``.
 
-    Accepts:
-      - ``None`` / empty string → disabled.
-      - ``int`` → fixed threshold.
-      - ``str`` (from env var) → "N".
+    Accepts ``None`` / empty string → disabled, ``int`` → direct, ``str``
+    (from env var) → parsed. ``bool`` is rejected (``True`` is technically
+    an int, but passing it here is almost certainly a bug).
     """
     if value is None or value == "":
         return None
     if isinstance(value, bool):
-        raise ValueError("summarize_at_tokens must be an int")
+        raise ValueError(f"{name} must be an int")
     if isinstance(value, str):
         try:
             parsed = int(value.strip())
         except ValueError as exc:
-            raise ValueError(
-                f"summarize_at_tokens must be an int (got {value!r})"
-            ) from exc
+            raise ValueError(f"{name} must be an int (got {value!r})") from exc
     elif isinstance(value, int):
         parsed = value
     else:
         raise ValueError(
-            f"summarize_at_tokens must be int or None (got {type(value).__name__})"
+            f"{name} must be int or None (got {type(value).__name__})"
         )
 
     if parsed <= 0:
-        raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
+        raise ValueError(f"{name} must be positive (got {parsed})")
     return parsed
+
+
+def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
+    """Normalize ``summarize_at_tokens`` to a positive int or ``None``."""
+    return _parse_positive_int("summarize_at_tokens", value)
+
+
+def _parse_max_context_tokens(value: int | str | None) -> int | None:
+    """Normalize ``max_context_tokens`` to a positive int or ``None``."""
+    return _parse_positive_int("max_context_tokens", value)
 
 
 class RLMEngine:
@@ -136,6 +158,7 @@ class RLMEngine:
         model: str | None = None,
         max_turns: int | None = None,
         summarize_at_tokens: int | None = None,
+        max_context_tokens: int | None = None,
         system_prompt_path: str | None = None,
         append_to_system_prompt: str | None = None,
         cwd: str | None = None,
@@ -159,6 +182,28 @@ class RLMEngine:
         else:
             env_value = summarize_at_tokens
         self.summarize_at_tokens = _parse_summarize_at_tokens(env_value)
+
+        # Hard context ceiling: caps per-call max_completion_tokens and
+        # triggers tool-result rollback when a response's prompt_tokens
+        # overshoots it. User kwarg wins; otherwise parse env var.
+        if max_context_tokens is None:
+            env_value = os.environ.get("RLM_MAX_CONTEXT_TOKENS")
+        else:
+            env_value = max_context_tokens
+        self.max_context_tokens = _parse_max_context_tokens(env_value)
+
+        # Invariant: the soft compaction trigger must be strictly below
+        # the hard ceiling, or compaction would fire at the ceiling with
+        # no room to generate a summary.
+        if (
+            self.summarize_at_tokens is not None
+            and self.max_context_tokens is not None
+            and self.summarize_at_tokens >= self.max_context_tokens
+        ):
+            raise ValueError(
+                f"summarize_at_tokens ({self.summarize_at_tokens}) must be "
+                f"< max_context_tokens ({self.max_context_tokens})"
+            )
 
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
@@ -197,6 +242,52 @@ class RLMEngine:
             return
         session_dir = os.environ.get("RLM_SESSION_DIR")
         self.session = Session(session_dir)
+
+    def _completion_budget_kwargs(self) -> dict:
+        """Extra kwargs for ``chat.completions.create`` to cap generation.
+
+        When ``max_context_tokens`` is set, passes ``max_completion_tokens``
+        computed from the remaining budget so the provider enforces the
+        cap server-side. The floor is the provider's default (we just
+        don't pass the kwarg when the remaining budget goes non-positive);
+        the post-response overshoot check is responsible for recovery if
+        the model or a tool result still overflows.
+        """
+        if self.max_context_tokens is None:
+            return {}
+        remaining = (
+            self.max_context_tokens
+            - self._last_prompt_tokens
+            - _BUDGET_MARGIN_TOKENS
+        )
+        if remaining <= 0:
+            return {}
+        return {"max_completion_tokens": remaining}
+
+    def _is_overshoot(self, prompt_tokens: int) -> bool:
+        if self.max_context_tokens is None:
+            return False
+        return prompt_tokens > self.max_context_tokens
+
+    @staticmethod
+    def _rollback_last_tool_result(messages: list[dict]) -> bool:
+        """Replace the most recent non-stub tool result with the overshoot stub.
+
+        Returns True if a rollback was performed, False if no eligible
+        ``role="tool"`` message was found — in which case the caller
+        should treat the situation as unrecoverable (system + initial
+        user prompt alone overflowed the ceiling, or we've already
+        rolled back every tool result to the stub).
+        """
+        for i in range(len(messages) - 1, -1, -1):
+            msg = messages[i]
+            if (
+                msg.get("role") == "tool"
+                and msg.get("content") != OVERSHOT_TOOL_RESULT_STUB
+            ):
+                messages[i] = {**msg, "content": OVERSHOT_TOOL_RESULT_STUB}
+                return True
+        return False
 
     async def run(self, prompt: str) -> RLMResult:
         """Run a single agent loop to completion."""
@@ -252,6 +343,7 @@ class RLMEngine:
             request_kwargs = {
                 "model": self.model,
                 "messages": messages,
+                **self._completion_budget_kwargs(),
             }
             if active_tools:
                 request_kwargs["tools"] = active_tools
@@ -264,6 +356,41 @@ class RLMEngine:
             self._total_usage.prompt_tokens += usage.prompt_tokens
             self._total_usage.completion_tokens += usage.completion_tokens
             self._last_prompt_tokens = usage.prompt_tokens
+
+            # Overshoot: the request we just sent exceeded max_context_tokens.
+            # The usual culprit is a fat tool result that landed in messages
+            # between the previous turn and this one. Roll it back to a short
+            # stub, fire compaction on the cleaned messages, and discard this
+            # turn's response (its reasoning references the tool_result we
+            # just replaced, and its tool_call — if any — would dangle).
+            if self._is_overshoot(usage.prompt_tokens):
+                rolled_back = self._rollback_last_tool_result(messages)
+                if not rolled_back:
+                    self._metrics.stop_reason = "context_budget_exceeded"
+                    final_text = (
+                        f"[context budget exceeded "
+                        f"({usage.prompt_tokens} > {self.max_context_tokens}) "
+                        f"with no tool result to roll back]"
+                    )
+                    break
+                self._metrics.note_overshoot_rollback()
+                self.session.log(
+                    {
+                        "type": "overshoot_rollback",
+                        "turn": turn,
+                        "prompt_tokens": usage.prompt_tokens,
+                        "max_context_tokens": self.max_context_tokens,
+                    }
+                )
+                compact_ok = await self._compact_branch(messages, turn)
+                if not compact_ok:
+                    final_text = (
+                        f"[compaction call exceeded max_context_tokens "
+                        f"({self.max_context_tokens}); "
+                        f"initial prompt may be too large]"
+                    )
+                    break
+                continue
 
             # Record root usage and assistant-visible context for this turn.
             self._metrics.note_root_usage(
@@ -380,7 +507,13 @@ class RLMEngine:
                 self.summarize_at_tokens is not None
                 and usage.prompt_tokens >= self.summarize_at_tokens
             ):
-                await self._compact_branch(messages, turn)
+                compact_ok = await self._compact_branch(messages, turn)
+                if not compact_ok:
+                    final_text = (
+                        f"[compaction call exceeded max_context_tokens "
+                        f"({self.max_context_tokens})]"
+                    )
+                    break
         else:
             self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"
@@ -402,7 +535,7 @@ class RLMEngine:
         )
         return result
 
-    async def _compact_branch(self, messages: list[dict], turn: int) -> None:
+    async def _compact_branch(self, messages: list[dict], turn: int) -> bool:
         """Ask the model for a handoff summary and rebuild ``messages``.
 
         Called in-place: mutates ``messages`` to ``[system, user(framing +
@@ -410,6 +543,13 @@ class RLMEngine:
         summary doesn't count toward ``max_turns`` — it's housekeeping,
         not a work turn — but its tokens land in ``_total_usage`` for
         cost accounting.
+
+        Returns ``True`` on success. Returns ``False`` (and sets
+        ``stop_reason = "context_budget_exceeded"``) if the compaction
+        call itself overshot ``max_context_tokens`` — i.e. the
+        post-rollback messages are still larger than the ceiling and
+        there's nothing further to recover. Caller should break out of
+        the run loop.
         """
         # Measure what's about to be dropped BEFORE appending the
         # checkpoint prompt — otherwise the prompt's own chars get
@@ -428,10 +568,28 @@ class RLMEngine:
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
+            **self._completion_budget_kwargs(),
         )
         usage = extract_usage(response)
         self._total_usage.prompt_tokens += usage.prompt_tokens
         self._total_usage.completion_tokens += usage.completion_tokens
+        self._last_prompt_tokens = usage.prompt_tokens
+
+        # If the compaction call itself overshot, we can't recover: the
+        # rollback already happened (or nothing was left to roll back),
+        # and summarising an oversized prompt won't fit either. Fail the
+        # rollout cleanly.
+        if self._is_overshoot(usage.prompt_tokens):
+            self._metrics.stop_reason = "context_budget_exceeded"
+            self.session.log(
+                {
+                    "type": "compaction_overshot",
+                    "turn": turn,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "max_context_tokens": self.max_context_tokens,
+                }
+            )
+            return False
 
         summary_text = response.choices[0].message.content or ""
 
@@ -474,6 +632,7 @@ class RLMEngine:
         )
         self._branch_start_turn = turn + 1
         self._metrics.turns_since_last_compaction = 0
+        return True
 
     def _load_system_prompt(
         self, messages_path: str, active_tools: list[BuiltinTool]

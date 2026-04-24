@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -56,11 +57,18 @@ class DummyToolCall:
 
 @dataclass
 class DummyMessage:
-    """A scripted assistant turn."""
+    """A scripted assistant turn.
+
+    ``usage`` overrides the default (1, 1) ``DummyUsage`` on the
+    response, which is needed by tests that care about ``prompt_tokens``
+    — e.g. anything exercising ``summarize_at_tokens`` or
+    ``max_context_tokens``.
+    """
 
     content: str | None = None
     tool_calls: list[DummyToolCall] | None = None
     role: str = "assistant"
+    usage: "DummyUsage | None" = None
 
     def model_dump(self, exclude_none: bool = True) -> dict[str, Any]:
         out: dict[str, Any] = {"role": self.role, "content": self.content}
@@ -108,10 +116,18 @@ class DummyClient:
         self.completions = self
 
     async def create(self, **kwargs: Any) -> DummyResponse:
-        self.calls.append(kwargs)
+        # Snapshot ``messages`` so later in-place mutations by the engine
+        # (e.g. compaction rebuilds the list) don't retroactively change
+        # what a test sees when inspecting past calls.
+        recorded = dict(kwargs)
+        if "messages" in recorded:
+            recorded["messages"] = copy.deepcopy(recorded["messages"])
+        self.calls.append(recorded)
         if not self.scripted:
             raise AssertionError("DummyClient exhausted: no more scripted messages")
-        return DummyResponse(choices=[DummyChoice(message=self.scripted.pop(0))])
+        msg = self.scripted.pop(0)
+        usage = msg.usage if msg.usage is not None else DummyUsage()
+        return DummyResponse(choices=[DummyChoice(message=msg)], usage=usage)
 
 
 def tool_result(client: DummyClient, turn: int = 0) -> str:
