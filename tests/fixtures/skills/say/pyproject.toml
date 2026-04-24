@@ -1,11 +1,11 @@
 [project]
 name = "rlm-skill-say"
 version = "0.1.0"
-description = "Print a string (test skill)."
+description = "Echo a string (test skill)."
 requires-python = ">=3.10"
 
 [project.scripts]
-say = "say.say:main"
+say = "rlm.skill:cli"
 
 [build-system]
 requires = ["hatchling"]

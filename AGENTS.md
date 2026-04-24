@@ -4,6 +4,7 @@
 
 - **Minimal try/except**: let errors propagate — silent failures hide bugs. Only catch for intentional fault tolerance (retries, robustness).
 - **Targeted comments**: don't explain your work process or reference old code. Use comments sparingly to clarify ambiguous logic or non-obvious constraints.
+- **No "this replaced that" comments**: never write comments or docstrings that reference code that used to exist. That context belongs in the PR, not in the file. Describe what the code does now, not what it isn't anymore.
 
 ## Running code
 

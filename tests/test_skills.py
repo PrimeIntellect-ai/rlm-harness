@@ -86,7 +86,7 @@ async def test_python_skill_invalid_args(session):
 
 
 async def test_bash_skill_invalid_args(session):
-    """Bash form: missing required arg → argparse prints a usage error on stderr."""
+    """Bash form: missing required arg → the CLI prints a usage error."""
     prompt = "say something"
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": "!say"})]),
@@ -100,7 +100,8 @@ async def test_bash_skill_invalid_args(session):
 
     output = tool_result(client)
     show_tool_result(output)
-    assert "the following arguments are required: --s" in output
+    assert "--s" in output
+    assert "required" in output
     assert result.answer == "the call failed"
 
 

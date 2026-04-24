@@ -10,6 +10,7 @@ dependencies = [
     "ipykernel",
     "jupyter_client",
     "nest_asyncio",
+    "tyro",
 ]
 
 [project.scripts]
