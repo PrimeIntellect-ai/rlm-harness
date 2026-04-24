@@ -87,3 +87,23 @@ async def test_invalid_skill_args(session):
     assert "TypeError" in output
     assert "missing 1 required positional argument: 'b'" in output
     assert result.answer == "the call failed"
+
+
+async def test_skill_raises(session):
+    """Skill raising inside the kernel: the traceback is returned to the model."""
+    prompt = "set off the boom skill"
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": "await boom()"})]),
+        DummyMessage(content="the call failed"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    result = await engine.run(prompt)
+
+    output = tool_result(client)
+    show_tool_result(output)
+    assert "RuntimeError" in output
+    assert "boom" in output
+    assert result.answer == "the call failed"
