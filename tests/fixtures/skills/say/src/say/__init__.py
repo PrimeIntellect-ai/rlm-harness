@@ -1,3 +1,3 @@
-from .say import PARAMETERS, main, run
+from .say import run
 
-__all__ = ["PARAMETERS", "main", "run"]
+__all__ = ["run"]

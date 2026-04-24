@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-PARAMETERS = {"type": "object", "properties": {}}
 
-
-async def run(**_) -> None:
-    raise RuntimeError("boom")
-
-
-def main() -> None:
+async def run() -> None:
+    """Always raise ``RuntimeError``."""
     raise RuntimeError("boom")

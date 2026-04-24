@@ -42,8 +42,9 @@ def build_system_prompt(
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
         skill_lines.append(f"Installed skills (pre-imported): {installed}.")
         skill_lines.append(
-            "Each skill is an async function by the same name. "
-            "Inspect its schema via `<skill>.PARAMETERS`."
+            "Each skill is exposed as a tool call with a schema derived from its `run` "
+            "signature, and is also pre-imported in the Python kernel as "
+            "`await <skill>(...)`."
         )
         skill_lines.append(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "

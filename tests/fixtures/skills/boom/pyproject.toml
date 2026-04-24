@@ -5,7 +5,7 @@ description = "Always raises (test skill)."
 requires-python = ">=3.10"
 
 [project.scripts]
-boom = "boom.boom:main"
+boom = "rlm.skill:cli"
 
 [build-system]
 requires = ["hatchling"]

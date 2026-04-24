@@ -4,6 +4,7 @@
 
 - **Minimal try/except**: let errors propagate — silent failures hide bugs. Only catch for intentional fault tolerance (retries, robustness).
 - **Targeted comments**: don't explain your work process or reference old code. Use comments sparingly to clarify ambiguous logic or non-obvious constraints.
+- **No "this replaced that" comments**: never write comments or docstrings that refer to code that used to exist (e.g. "no more `PARAMETERS` dict", "gone — no hand-written `main()`", "replaces the old argparse wrapper", "used to do X, now does Y"). They make sense only in the PR that introduced the change; outside that context they're noise that confuses readers who never saw the old code. Describe what the code does now, not what it isn't anymore.
 
 ## Running code
 

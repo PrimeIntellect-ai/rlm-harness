@@ -1,3 +1,3 @@
-from .boom import PARAMETERS, main, run
+from .boom import run
 
-__all__ = ["PARAMETERS", "main", "run"]
+__all__ = ["run"]
