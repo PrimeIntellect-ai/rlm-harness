@@ -89,11 +89,31 @@ async def test_invalid_skill_args(session):
     assert result.answer == "the call failed"
 
 
-async def test_skill_raises(session):
-    """Skill raising inside the kernel: the traceback is returned to the model."""
+async def test_python_skill_raises(session):
+    """Python form: ``await boom()`` raising inside the kernel surfaces the traceback."""
     prompt = "set off the boom skill"
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": "await boom()"})]),
+        DummyMessage(content="the call failed"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    result = await engine.run(prompt)
+
+    output = tool_result(client)
+    show_tool_result(output)
+    assert "RuntimeError" in output
+    assert "boom" in output
+    assert result.answer == "the call failed"
+
+
+async def test_bash_skill_raises(session):
+    """Bash form: ``!boom`` raising in the CLI surfaces the traceback on stderr."""
+    prompt = "set off the boom skill"
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": "!boom"})]),
         DummyMessage(content="the call failed"),
     ]
 
