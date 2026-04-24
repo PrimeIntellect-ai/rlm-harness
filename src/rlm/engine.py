@@ -13,7 +13,6 @@ from openai import AsyncOpenAI
 from rlm.client import extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
-from rlm.skill import get_skill_tools
 from rlm.tools import (
     SKILLS_DIR,
     BuiltinTool,
@@ -21,6 +20,7 @@ from rlm.tools import (
     ToolContext,
     ToolOutcome,
     get_active_builtin_tools,
+    get_builtin_tool,
     get_installed_skills,
 )
 from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
@@ -235,9 +235,7 @@ class RLMEngine:
 
     async def _run_loop(self, prompt: str) -> RLMResult:
         active_builtin_tools = get_active_builtin_tools()
-        # Builtins override skills on name collision.
-        tools_by_name = {t.name: t for t in (*get_skill_tools(), *active_builtin_tools)}
-        active_tools = [t.schema() for t in tools_by_name.values()]
+        active_tools = [tool.schema() for tool in active_builtin_tools]
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
 
@@ -346,7 +344,7 @@ class RLMEngine:
             tool_name = tc.function.name
             tool_args = parsed_args[0]
             t0 = time.time()
-            tool = tools_by_name.get(tool_name)
+            tool = get_builtin_tool(tool_name)
             if tool is None:
                 tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
             else:

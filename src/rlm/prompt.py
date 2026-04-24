@@ -42,13 +42,11 @@ def build_system_prompt(
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
         skill_lines.append(f"Installed skills (pre-imported): {installed}.")
         skill_lines.append(
-            "Each skill is exposed as a tool call with a schema derived from its `run` "
-            "signature, and is also pre-imported in the Python kernel as "
-            "`await <skill>(...)`."
+            "Each skill exposes an async `run(...)`; call via `await <skill>(...)`. "
+            "Inspect with `help(<skill>)` or `inspect.signature(<skill>.run)`."
         )
         skill_lines.append(
-            "Each skill is also available as a shell command by the same name: `<skill> ...`. "
-            "Discover its CLI usage with `<skill> --help`."
+            "Each skill is also a shell command: `<skill> --help` for CLI usage."
         )
     if skill_lines:
         parts.extend(["", *skill_lines])

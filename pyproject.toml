@@ -7,7 +7,6 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
     "openai>=1.0",
-    "openai-agents",
     "ipykernel",
     "jupyter_client",
     "nest_asyncio",
