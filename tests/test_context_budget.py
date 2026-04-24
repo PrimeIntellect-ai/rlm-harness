@@ -3,7 +3,6 @@
 Drives ``RLMEngine`` with scripted responses whose ``usage.prompt_tokens``
 is set explicitly, so we can verify:
 
-- the engine passes ``max_completion_tokens`` derived from remaining budget
 - an overshoot on a normal turn rolls back the last tool result and fires
   compaction, discarding the overshot response (hard path)
 - soft compaction fires on a tool_call turn before execution: the tool
@@ -11,8 +10,7 @@ is set explicitly, so we can verify:
   compaction runs on messages that fit under the ceiling by construction
 - compaction-call overshoot terminates cleanly
   (``stop_reason = "context_budget_exceeded"``)
-- with no ceiling set, none of the above happens (huge ``prompt_tokens``
-  just pass through)
+- with no ceiling set, huge ``prompt_tokens`` just pass through
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ from rlm.engine import (
     OVERSHOT_TOOL_RESULT_STUB,
     POST_COMPACTION_FRAMING,
     SOFT_COMPACT_SKIPPED_STUB,
-    _BUDGET_MARGIN_TOKENS,
     RLMEngine,
 )
 
@@ -38,37 +35,6 @@ from rlm.engine import (
 def no_tools(monkeypatch):
     """Disable all tools so the engine doesn't spin up an ipython kernel."""
     monkeypatch.setenv("RLM_TOOLS", "")
-
-
-async def test_completion_budget_kwarg_on_each_call(session, register_add_tool):
-    """``max_completion_tokens`` = max_context - last_prompt - margin on every call."""
-    messages = [
-        DummyMessage(
-            tool_calls=[DummyToolCall("add", {"a": 1, "b": 2})],
-            usage=DummyUsage(prompt_tokens=200, completion_tokens=30),
-        ),
-        DummyMessage(
-            content="done",
-            usage=DummyUsage(prompt_tokens=500, completion_tokens=20),
-        ),
-    ]
-    client = DummyClient(messages)
-    engine = RLMEngine(
-        client=client,  # type: ignore[arg-type]
-        session=session,
-        max_context_tokens=10_000,
-    )
-
-    await engine.run("go")
-
-    # First call: _last_prompt_tokens starts at 0, so cap is 10000 - 0 - margin.
-    assert (
-        client.calls[0]["max_completion_tokens"] == 10_000 - 0 - _BUDGET_MARGIN_TOKENS
-    )
-    # Second call: after first response, _last_prompt_tokens is 200.
-    assert (
-        client.calls[1]["max_completion_tokens"] == 10_000 - 200 - _BUDGET_MARGIN_TOKENS
-    )
 
 
 async def test_no_ceiling_no_budget_kwarg(session, register_add_tool):
