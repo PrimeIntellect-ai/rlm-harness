@@ -14,7 +14,13 @@ Kernel startup is ~700ms per test; keep the set here small.
 
 from __future__ import annotations
 
-from conftest import DummyClient, DummyMessage, DummyToolCall, tool_result
+from conftest import (
+    DummyClient,
+    DummyMessage,
+    DummyToolCall,
+    show_tool_result,
+    tool_result,
+)
 
 from rlm.engine import RLMEngine
 
@@ -36,6 +42,7 @@ async def test_valid_python_skill(session):
 
     result = await engine.run(prompt)
 
+    show_tool_result(tool_result(client))
     assert tool_result(client).strip() == "5"
     assert result.answer == "the sum is 5"
 
@@ -55,6 +62,7 @@ async def test_valid_bash_skill(session):
 
     result = await engine.run(prompt)
 
+    show_tool_result(tool_result(client))
     assert tool_result(client).strip() == "5"
     assert result.answer == "the sum is 5"
 
@@ -75,6 +83,7 @@ async def test_invalid_skill_args(session):
     result = await engine.run(prompt)
 
     output = tool_result(client)
+    show_tool_result(output)
     assert "TypeError" in output
     assert "missing 1 required positional argument: 'b'" in output
     assert result.answer == "the call failed"

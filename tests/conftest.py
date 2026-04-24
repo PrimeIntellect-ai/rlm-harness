@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 from fixtures.tools.add import AddTool
+from fixtures.tools.boom import BoomTool
 
 from rlm.session import Session
 from rlm.tools import registry as tool_registry
@@ -125,6 +126,11 @@ def tool_result(client: DummyClient, turn: int = 0) -> str:
     return tool_messages[turn]["content"]
 
 
+def show_tool_result(output: str) -> None:
+    """Pretty-print a tool result for ``pytest -s`` inspection."""
+    print(f"\n── tool result ──\n{output.rstrip()}\n─────────────────")
+
+
 # --- Fixtures ------------------------------------------------------------
 
 
@@ -132,6 +138,12 @@ def tool_result(client: DummyClient, turn: int = 0) -> str:
 def register_add_tool(monkeypatch):
     """Restrict RLM_TOOLS to ``add`` so the engine doesn't bring up the ipython kernel."""
     monkeypatch.setenv("RLM_TOOLS", "add")
+
+
+@pytest.fixture
+def register_boom_tool(monkeypatch):
+    """Restrict RLM_TOOLS to ``boom`` so the engine doesn't bring up the ipython kernel."""
+    monkeypatch.setenv("RLM_TOOLS", "boom")
 
 
 @pytest.fixture
@@ -152,9 +164,10 @@ def session(tmp_path):
 
 @pytest.fixture(scope="session", autouse=True)
 def register_fixture_tools():
-    """Session-wide: AddTool joins the builtin registry alongside ipython/summarize/bash/edit."""
+    """Session-wide: fixture tools join the builtin registry alongside ipython/summarize/bash/edit."""
     mp = pytest.MonkeyPatch()
     mp.setitem(tool_registry._TOOLS_BY_NAME, "add", AddTool())
+    mp.setitem(tool_registry._TOOLS_BY_NAME, "boom", BoomTool())
     yield
     mp.undo()
 

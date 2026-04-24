@@ -10,7 +10,14 @@ exercise how the harness reacts to model tool-call behavior:
 
 from __future__ import annotations
 
-from conftest import DummyClient, DummyMessage, DummyToolCall, tool_result
+import pytest
+from conftest import (
+    DummyClient,
+    DummyMessage,
+    DummyToolCall,
+    show_tool_result,
+    tool_result,
+)
 
 from rlm.engine import RLMEngine
 
@@ -28,6 +35,7 @@ async def test_valid_tool(session, register_add_tool):
 
     result = await engine.run(prompt)
 
+    show_tool_result(tool_result(client))
     assert tool_result(client) == "5"
     assert result.answer == "the sum is 5"
     assert result.turns == 2
@@ -48,3 +56,15 @@ async def test_invalid_tool_args(session, register_add_tool):
     assert "invalid JSON arguments" in result.answer
     assert result.turns == 1
     assert engine._metrics.stop_reason == "invalid_tool_args"
+
+
+async def test_tool_raises(session, register_boom_tool):
+    """Tool raising from execute() propagates out of engine.run()."""
+    prompt = "set off the boom tool"
+    messages = [DummyMessage(tool_calls=[DummyToolCall("boom", {})])]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await engine.run(prompt)
