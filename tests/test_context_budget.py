@@ -161,6 +161,74 @@ async def test_overshoot_with_nothing_to_roll_back_is_terminal(session, no_tools
     assert "no tool result to roll back" in result.answer
 
 
+async def test_compaction_call_overshoot_recovers_via_rollback(
+    session, register_add_tool
+):
+    """Soft compaction's own call overshoots → internal rollback + retry succeeds.
+
+    The ``summarize_at_tokens`` check uses the *previous* call's
+    ``prompt_tokens`` (stale: it doesn't reflect the current turn's
+    assistant + tool_result). When a fat tool_result lands between
+    turns, soft compaction can fire with a ``messages`` list already
+    past ``max_context_tokens``. Before the fix, that terminated the
+    rollout; now ``_compact_branch`` rolls the tool_result back to the
+    stub and retries its own call.
+    """
+    messages = [
+        # T1: model calls a tool. Prompt small.
+        DummyMessage(
+            tool_calls=[DummyToolCall("add", {"a": 1, "b": 2}, id="call_a")],
+            usage=DummyUsage(prompt_tokens=200, completion_tokens=30),
+        ),
+        # T2: second tool call. prompt_tokens=4500 crosses summarize_at
+        # (4000) but not max_context (10000). No overshoot yet, so the
+        # normal turn runs to completion and then soft compaction fires
+        # on the stale 4500 value.
+        DummyMessage(
+            tool_calls=[DummyToolCall("add", {"a": 2, "b": 3}, id="call_b")],
+            usage=DummyUsage(prompt_tokens=4500, completion_tokens=30),
+        ),
+        # Compaction call #1: after the fat(-ish) tool result from T2
+        # was appended, the actual prompt overshoots.
+        DummyMessage(
+            content="never used",
+            usage=DummyUsage(prompt_tokens=11_000, completion_tokens=10),
+        ),
+        # Compaction call #2: retried after rolling back T2's
+        # tool_result to the stub. Fits.
+        DummyMessage(
+            content="handoff summary",
+            usage=DummyUsage(prompt_tokens=800, completion_tokens=30),
+        ),
+        # T3: post-compaction, model finishes.
+        DummyMessage(
+            content="final answer",
+            usage=DummyUsage(prompt_tokens=400, completion_tokens=10),
+        ),
+    ]
+    client = DummyClient(messages)
+    engine = RLMEngine(
+        client=client,  # type: ignore[arg-type]
+        session=session,
+        summarize_at_tokens=4_000,
+        max_context_tokens=10_000,
+    )
+
+    result = await engine.run("do the thing")
+
+    # Compaction eventually succeeded after one internal rollback retry.
+    assert engine._metrics.compactions_count == 1
+    assert engine._metrics.overshoot_rollbacks == 1
+    assert engine._metrics.stop_reason == "done"
+    assert result.answer == "final answer"
+
+    # Compaction retry (call index 3) should have seen the rolled-back stub.
+    retry_call_msgs = client.calls[3]["messages"]
+    tool_msgs = [m for m in retry_call_msgs if m.get("role") == "tool"]
+    # T2's tool result (the most recent) is the one that got rolled back.
+    assert any(m["content"] == OVERSHOT_TOOL_RESULT_STUB for m in tool_msgs)
+
+
 async def test_compaction_call_overshoot_is_terminal(session, register_add_tool):
     """If compaction itself overshoots, rollout fails with context_budget_exceeded."""
     messages = [
