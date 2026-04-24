@@ -197,10 +197,16 @@ async def test_compaction_call_overshoot_is_terminal(session, register_add_tool)
 
 
 def test_validation_summarize_must_be_below_ceiling():
-    """``summarize_at_tokens`` >= ``max_context_tokens`` is rejected at init."""
+    """``summarize_at_tokens`` >= ``max_context_tokens`` is rejected at init.
+
+    A dummy client is passed so ``make_client()`` isn't invoked — otherwise
+    CI without ``OPENAI_API_KEY`` set would fail at the ``AsyncOpenAI()``
+    construction, long after the validation we're actually testing.
+    """
+    dummy = DummyClient([])
     with pytest.raises(ValueError, match="summarize_at_tokens"):
-        RLMEngine(summarize_at_tokens=5_000, max_context_tokens=5_000)
+        RLMEngine(summarize_at_tokens=5_000, max_context_tokens=5_000, client=dummy)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="summarize_at_tokens"):
-        RLMEngine(summarize_at_tokens=6_000, max_context_tokens=5_000)
+        RLMEngine(summarize_at_tokens=6_000, max_context_tokens=5_000, client=dummy)  # type: ignore[arg-type]
     # Valid combo does not raise.
-    RLMEngine(summarize_at_tokens=4_000, max_context_tokens=5_000)
+    RLMEngine(summarize_at_tokens=4_000, max_context_tokens=5_000, client=dummy)  # type: ignore[arg-type]
