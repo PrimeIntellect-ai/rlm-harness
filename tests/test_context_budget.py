@@ -59,13 +59,11 @@ async def test_completion_budget_kwarg_on_each_call(session, register_add_tool):
 
     # First call: _last_prompt_tokens starts at 0, so cap is 10000 - 0 - margin.
     assert (
-        client.calls[0]["max_completion_tokens"]
-        == 10_000 - 0 - _BUDGET_MARGIN_TOKENS
+        client.calls[0]["max_completion_tokens"] == 10_000 - 0 - _BUDGET_MARGIN_TOKENS
     )
     # Second call: after first response, _last_prompt_tokens is 200.
     assert (
-        client.calls[1]["max_completion_tokens"]
-        == 10_000 - 200 - _BUDGET_MARGIN_TOKENS
+        client.calls[1]["max_completion_tokens"] == 10_000 - 200 - _BUDGET_MARGIN_TOKENS
     )
 
 

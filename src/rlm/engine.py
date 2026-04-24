@@ -133,9 +133,7 @@ def _parse_positive_int(name: str, value: int | str | None) -> int | None:
     elif isinstance(value, int):
         parsed = value
     else:
-        raise ValueError(
-            f"{name} must be int or None (got {type(value).__name__})"
-        )
+        raise ValueError(f"{name} must be int or None (got {type(value).__name__})")
 
     if parsed <= 0:
         raise ValueError(f"{name} must be positive (got {parsed})")
@@ -256,9 +254,7 @@ class RLMEngine:
         if self.max_context_tokens is None:
             return {}
         remaining = (
-            self.max_context_tokens
-            - self._last_prompt_tokens
-            - _BUDGET_MARGIN_TOKENS
+            self.max_context_tokens - self._last_prompt_tokens - _BUDGET_MARGIN_TOKENS
         )
         if remaining <= 0:
             return {}
