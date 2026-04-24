@@ -172,10 +172,36 @@ def register_fixture_tools():
     mp.undo()
 
 
+_SKILL_WRAPPER_TEMPLATE = """\
+#!/usr/bin/env bash
+set -eo pipefail
+REAL_TOOL={real_path!r}
+TOOL_NAME={tool_name!r}
+SOURCE="${{RLM_TOOL_CALL_SOURCE:-bash}}"
+if [ -n "${{RLM_SESSION_DIR:-}}" ]; then
+  printf '{{"tool":"%s","source":"%s","timestamp":%s}}\\n' \\
+      "$TOOL_NAME" "$SOURCE" "$(date +%s.%N)" \\
+      >> "${{RLM_SESSION_DIR}}/programmatic_tool_calls.jsonl" 2>/dev/null || true
+fi
+exec "$REAL_TOOL" "$@"
+"""
+
+
 @pytest.fixture(scope="session", autouse=True)
 def install_fixture_skills():
-    """Editable-install every skill under ``tests/fixtures/skills/`` once per session."""
+    """Editable-install every skill under ``tests/fixtures/skills/`` once per session.
+
+    Also installs the same bash wrapper ``install.sh`` creates around each
+    skill CLI so that ``!<skill>`` invocations log a ``source="bash"`` entry
+    to ``programmatic_tool_calls.jsonl``. Without this the fixture
+    environment diverges from production and bash-path metrics tests fail.
+    """
     installed: list[str] = []
+    wrapped: list[tuple[Path, Path]] = []  # (wrapper_path, real_path)
+    bin_dir = Path(sys.executable).parent
+    real_tool_dir = bin_dir / ".rlm-real-tools"
+    real_tool_dir.mkdir(exist_ok=True)
+
     for skill_dir in sorted(SKILL_FIXTURES_DIR.iterdir()):
         if not (skill_dir / "pyproject.toml").is_file():
             continue
@@ -193,7 +219,24 @@ def install_fixture_skills():
             check=True,
         )
         installed.append(f"rlm-skill-{skill_dir.name.replace('_', '-')}")
+
+        tool_name = skill_dir.name
+        wrapper_path = bin_dir / tool_name
+        real_path = real_tool_dir / tool_name
+        if wrapper_path.is_file() and not real_path.is_file():
+            wrapper_path.rename(real_path)
+            wrapper_path.write_text(
+                _SKILL_WRAPPER_TEMPLATE.format(
+                    real_path=str(real_path), tool_name=tool_name
+                )
+            )
+            wrapper_path.chmod(0o755)
+            wrapped.append((wrapper_path, real_path))
     yield
+    for wrapper_path, real_path in wrapped:
+        wrapper_path.unlink(missing_ok=True)
+        if real_path.is_file():
+            real_path.rename(wrapper_path)
     for dist in installed:
         subprocess.run(
             ["uv", "pip", "uninstall", dist, "--python", sys.executable],
