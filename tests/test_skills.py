@@ -127,3 +127,41 @@ async def test_bash_skill_raises(session):
     assert "RuntimeError" in output
     assert "boom" in output
     assert result.answer == "the call failed"
+
+
+async def test_python_raise_halts_execution(session):
+    """Python form: a raise halts the cell — code after ``await boom()`` is not executed."""
+    code = "await boom(); print(await add(a=2, b=3))"
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": code})]),
+        DummyMessage(content="the call failed"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    await engine.run("try boom then add")
+
+    output = tool_result(client)
+    show_tool_result(output)
+    assert "RuntimeError" in output
+    assert "5\n" not in output  # add's stdout is "5\n" — must not appear
+
+
+async def test_bash_raise_halts_execution(session):
+    """Bash form: ``&&`` short-circuits — ``add`` is not executed after ``boom`` fails."""
+    code = "!boom && add --a 2 --b 3"
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": code})]),
+        DummyMessage(content="the call failed"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    await engine.run("try boom then add")
+
+    output = tool_result(client)
+    show_tool_result(output)
+    assert "RuntimeError" in output
+    assert "5\n" not in output  # add's stdout is "5\n" — must not appear
