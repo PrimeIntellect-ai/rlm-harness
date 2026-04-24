@@ -14,6 +14,8 @@ Kernel startup is ~700ms per test; keep the set here small.
 
 from __future__ import annotations
 
+import json
+
 from conftest import (
     DummyClient,
     DummyMessage,
@@ -44,6 +46,14 @@ async def test_python_skill_valid(session):
     show_tool_result(output)
     assert "hello" in output
     assert result.answer == "ok"
+
+    # The python-form call must be logged to programmatic_tool_calls.jsonl
+    # with source="python". Regressing this (e.g. subprocess shim gets
+    # replaced with an in-process wrap that forgets to log) silently zeroes
+    # the rlm_programmatic_tool_calls_python metric.
+    log_path = session.dir / "programmatic_tool_calls.jsonl"
+    entries = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert any(e["tool"] == "say" and e["source"] == "python" for e in entries)
 
 
 async def test_bash_skill_valid(session):

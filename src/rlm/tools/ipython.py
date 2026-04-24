@@ -151,13 +151,30 @@ class IPythonREPL:
         installed_skills = get_installed_skills()
 
         setup_code = f"""\
-import os, sys, types
+import os, sys, types, json, time
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 
 import nest_asyncio
 nest_asyncio.apply()
+
+
+def _log_programmatic_call(tool_name, source):
+    # Matches the line format written by install.sh's bash wrapper so
+    # ProgrammaticToolCallStats.from_log parses both sources identically.
+    session_dir = os.environ.get('RLM_SESSION_DIR', '')
+    if not session_dir:
+        return
+    try:
+        with open(os.path.join(session_dir, 'programmatic_tool_calls.jsonl'), 'a') as f:
+            f.write(json.dumps({{
+                'tool': tool_name,
+                'source': source,
+                'timestamp': time.time(),
+            }}) + '\\n')
+    except OSError:
+        pass
 
 
 class _CallableModule(types.ModuleType):
@@ -168,18 +185,26 @@ class _CallableModule(types.ModuleType):
         return await self.run(*args, **kwargs)
 
 
-def _wrap_callable(mod):
+def _wrap_callable(mod, log_source):
+    # log_source: 'python' for skills (logged to programmatic_tool_calls.jsonl),
+    # None for rlm (already aggregated via Session.aggregate_child_metrics).
     wrapped = _CallableModule(mod.__name__)
     wrapped.__dict__.update(mod.__dict__)
+    if log_source is not None:
+        _original_run = wrapped.run
+        async def _logged_run(*args, **kwargs):
+            _log_programmatic_call(mod.__name__, log_source)
+            return await _original_run(*args, **kwargs)
+        wrapped.run = _logged_run
     sys.modules[mod.__name__] = wrapped
     return wrapped
 
 
 for _name in {installed_skills!r}:
-    globals()[_name] = _wrap_callable(__import__(_name))
+    globals()[_name] = _wrap_callable(__import__(_name), 'python')
 
 if {allow_recursion!r}:
-    globals()['rlm'] = _wrap_callable(__import__('rlm'))
+    globals()['rlm'] = _wrap_callable(__import__('rlm'), None)
 """
         self._execute_silent(setup_code)
 
