@@ -146,8 +146,8 @@ async def test_bash_skill_raises(session):
 
 async def test_python_skill_halt_on_raise(session):
     """Python form: a raise halts the cell — ``say`` after ``await boom()`` is not executed."""
-    # Source has ``"X" * 5`` literal; say would print ``XXXXX`` only if it ran.
-    code = "await boom(); await say(s='X' * 5)"
+    # Source shows ``'R' + 'A' + 'N'``; say would print ``RAN`` only if it ran.
+    code = "await boom(); await say(s='R' + 'A' + 'N')"
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": code})]),
         DummyMessage(content="the call failed"),
@@ -161,7 +161,7 @@ async def test_python_skill_halt_on_raise(session):
     output = tool_result(client)
     show_tool_result(output)
     assert "RuntimeError" in output
-    assert "XXXXX" not in output
+    assert "RAN" not in output
 
 
 async def test_bash_skill_halt_on_raise(session):
