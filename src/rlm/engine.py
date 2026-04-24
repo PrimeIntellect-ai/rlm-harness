@@ -539,8 +539,14 @@ class RLMEngine:
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
         else:
+            # Max turns hit. Don't surface msg.content here: after a
+            # hard-overshoot `continue` on the final iteration, `msg`
+            # is stale (or unassigned if max_turns == 1). And
+            # semantically, we only reach this branch when every turn
+            # had a tool_call — so msg.content is the model's
+            # intermediate reasoning, not an answer.
             self._metrics.stop_reason = "max_turns"
-            final_text = msg.content or "[max turns reached]"
+            final_text = "[max turns reached]"
 
         result = RLMResult(
             answer=final_text,
