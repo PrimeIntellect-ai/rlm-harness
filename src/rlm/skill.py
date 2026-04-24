@@ -23,7 +23,7 @@ def run_cli(func: Any, prog: str | None = None) -> None:
 
     Async returns are awaited; non-``None`` return values are printed.
     """
-    result = tyro.cli(func, prog=prog or Path(sys.argv[0]).name)
+    result = tyro.cli(func, prog=prog or Path(sys.argv[0]).stem)
     if inspect.isawaitable(result):
         result = asyncio.run(result)
     if result is not None:
@@ -36,6 +36,6 @@ def cli() -> None:
     Dispatches based on ``sys.argv[0]`` basename — invoked as ``say`` it
     imports the ``say`` module and runs its ``run`` via ``run_cli``.
     """
-    name = Path(sys.argv[0]).name
+    name = Path(sys.argv[0]).stem
     module = importlib.import_module(name)
     run_cli(module.run, prog=name)
