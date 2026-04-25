@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import random
 import time
 from pathlib import Path
 
@@ -99,35 +101,92 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     return args, None
 
 
-def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
-    """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
+def _parse_summarize_at_tokens(
+    value: int | tuple[int, int] | list[int] | str | None,
+) -> int | tuple[int, int] | None:
+    """Normalize ``summarize_at_tokens`` to int, ``(lo, hi)``, or ``None``.
 
     Accepts:
       - ``None`` / empty string → disabled.
       - ``int`` → fixed threshold.
-      - ``str`` (from env var) → "N".
+      - ``(lo, hi)`` / ``[lo, hi]`` → range; the engine draws a stable
+        per-prompt threshold from this range at run time.
+      - ``str`` (from env var) → ``"N"`` or ``"lo,hi"``.
     """
     if value is None or value == "":
         return None
     if isinstance(value, bool):
-        raise ValueError("summarize_at_tokens must be an int")
+        raise ValueError("summarize_at_tokens must be an int or (lo, hi) pair")
     if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        if not parts:
+            return None
         try:
-            parsed = int(value.strip())
+            ints = [int(p) for p in parts]
         except ValueError as exc:
             raise ValueError(
-                f"summarize_at_tokens must be an int (got {value!r})"
+                f"summarize_at_tokens must be 'N' or 'lo,hi' (got {value!r})"
             ) from exc
+        if len(ints) == 1:
+            parsed: int | tuple[int, int] = ints[0]
+        elif len(ints) == 2:
+            parsed = (ints[0], ints[1])
+        else:
+            raise ValueError(
+                f"summarize_at_tokens string must have 1 or 2 ints "
+                f"(got {value!r})"
+            )
     elif isinstance(value, int):
         parsed = value
+    elif isinstance(value, (tuple, list)):
+        if len(value) != 2:
+            raise ValueError(
+                f"summarize_at_tokens pair must have 2 elements (got {value!r})"
+            )
+        parsed = (int(value[0]), int(value[1]))
     else:
         raise ValueError(
-            f"summarize_at_tokens must be int or None (got {type(value).__name__})"
+            f"summarize_at_tokens must be int, (lo, hi), or None "
+            f"(got {type(value).__name__})"
         )
 
-    if parsed <= 0:
-        raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
+    if isinstance(parsed, int):
+        if parsed <= 0:
+            raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
+        return parsed
+    lo, hi = parsed
+    if lo <= 0 or hi <= 0:
+        raise ValueError(
+            f"summarize_at_tokens values must be positive (got lo={lo}, hi={hi})"
+        )
+    if lo > hi:
+        raise ValueError(
+            f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})"
+        )
     return parsed
+
+
+def _draw_summarize_at_tokens(
+    value: int | tuple[int, int] | None,
+    prompt: str,
+    seed: str,
+) -> int | None:
+    """Resolve a ``summarize_at_tokens`` value to a concrete int.
+
+    Ints and ``None`` pass through. A ``(lo, hi)`` range is hashed
+    against ``f"{prompt}|{seed}"`` (sha256) and draws uniformly from
+    ``[lo, hi]``. Identical (prompt, seed) → identical threshold;
+    different prompts or different seeds → different threshold.
+
+    Stable across processes and Python versions because hashlib.sha256
+    is not affected by PYTHONHASHSEED.
+    """
+    if value is None or isinstance(value, int):
+        return value
+    lo, hi = value
+    digest = hashlib.sha256(f"{prompt}|{seed}".encode("utf-8")).hexdigest()
+    seed_int = int(digest[:16], 16)
+    return random.Random(seed_int).randint(lo, hi)
 
 
 class RLMEngine:
@@ -135,7 +194,8 @@ class RLMEngine:
         self,
         model: str | None = None,
         max_turns: int | None = None,
-        summarize_at_tokens: int | None = None,
+        summarize_at_tokens: int | tuple[int, int] | list[int] | None = None,
+        random_seed: int | None = None,
         system_prompt_path: str | None = None,
         append_to_system_prompt: str | None = None,
         cwd: str | None = None,
@@ -154,11 +214,21 @@ class RLMEngine:
         self.max_output = max_output
 
         # Auto-compaction threshold: user kwarg wins; otherwise parse env var.
+        # May be int (fixed) or (lo, hi) (range; draws at run() time).
         if summarize_at_tokens is None:
             env_value = os.environ.get("RLM_SUMMARIZE_AT_TOKENS")
         else:
             env_value = summarize_at_tokens
         self.summarize_at_tokens = _parse_summarize_at_tokens(env_value)
+
+        # Seed for the per-prompt threshold draw. Default is fixed so
+        # rollouts are reproducible by default; vary externally for
+        # multi-run sweeps.
+        self._random_seed = (
+            str(random_seed)
+            if random_seed is not None
+            else os.environ.get("RLM_RANDOM_SEED", "1234567")
+        )
 
         self.system_prompt_path = system_prompt_path or os.environ.get(
             "RLM_SYSTEM_PROMPT_PATH"
@@ -206,6 +276,13 @@ class RLMEngine:
                 answer=f"[depth limit {self.max_depth} reached, cannot start]",
                 turns=0,
             )
+
+        # Resolve a (lo, hi) range to a concrete int once per rollout,
+        # seeded by (prompt, random_seed). Same (prompt, seed) → same
+        # threshold for every rollout in a group.
+        self.summarize_at_tokens = _draw_summarize_at_tokens(
+            self.summarize_at_tokens, prompt, self._random_seed
+        )
 
         self._ensure_session()
 

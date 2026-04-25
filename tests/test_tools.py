@@ -70,6 +70,36 @@ async def test_tool_raises(session, register_boom_tool):
         await engine.run(prompt)
 
 
+def test_draw_summarize_at_tokens_is_deterministic_per_prompt():
+    """``(lo, hi)`` resolves to the same int for the same (prompt, seed).
+
+    Range collision odds are kept negligible by using a wide range
+    (~10^9), so the inequality assertions are effectively
+    non-probabilistic.
+    """
+    from rlm.engine import _draw_summarize_at_tokens
+
+    # int and None pass through unchanged
+    assert _draw_summarize_at_tokens(500, "any", "42") == 500
+    assert _draw_summarize_at_tokens(None, "any", "42") is None
+
+    # Same (prompt, seed) → same draw, always in range
+    a = _draw_summarize_at_tokens((1000, 2000), "task A", "42")
+    b = _draw_summarize_at_tokens((1000, 2000), "task A", "42")
+    assert a == b
+    assert 1000 <= a <= 2000
+
+    # Different prompt → different draw
+    c = _draw_summarize_at_tokens((1, 10**9), "task A", "42")
+    d = _draw_summarize_at_tokens((1, 10**9), "task B", "42")
+    assert c != d
+
+    # Different seed → different draw
+    e = _draw_summarize_at_tokens((1, 10**9), "task A", "42")
+    f = _draw_summarize_at_tokens((1, 10**9), "task A", "different")
+    assert e != f
+
+
 def test_bash_tool_handles_non_utf8_output():
     """Bash command stdout containing invalid UTF-8 must not crash the tool.
 
