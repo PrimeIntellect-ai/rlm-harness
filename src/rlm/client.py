@@ -35,11 +35,11 @@ def make_client() -> AsyncOpenAI:
         or os.environ.get("OPENAI_API_KEY")
         or os.environ.get("ANTHROPIC_API_KEY")
     )
-    kwargs: dict[str, Any] = {"base_url": base_url, "api_key": api_key}
-    sdk_max_retries = os.environ.get("RLM_SDK_MAX_RETRIES")
-    if sdk_max_retries is not None:
-        kwargs["max_retries"] = int(sdk_max_retries)
-    return AsyncOpenAI(**kwargs)
+    return AsyncOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        max_retries=int(os.environ.get("RLM_SDK_MAX_RETRIES", 5)),
+    )
 
 
 async def call_with_retries(
