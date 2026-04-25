@@ -68,3 +68,27 @@ async def test_tool_raises(session, register_boom_tool):
 
     with pytest.raises(RuntimeError, match="boom"):
         await engine.run(prompt)
+
+
+def test_bash_tool_handles_non_utf8_output():
+    """Bash command stdout containing invalid UTF-8 must not crash the tool.
+
+    `printf '\\xf0'` produces a single 0xf0 byte — a 4-byte UTF-8 lead
+    with no continuation bytes. Without ``errors="replace"`` on the
+    subprocess decode, this raises ``UnicodeDecodeError`` and propagates
+    up as an AgentError that ends the rollout.
+    """
+    from rlm.tools.base import ToolContext
+    from rlm.tools.bash import BashTool
+    from rlm.types import RLMMetrics, TokenUsage
+
+    tool = BashTool()
+    ctx = ToolContext(
+        messages=[],
+        metrics=RLMMetrics(),
+        total_usage=TokenUsage(),
+        last_prompt_tokens=0,
+        exec_timeout=10,
+    )
+    outcome = tool.execute({"command": "printf '\\xf0'"}, ctx)
+    assert "�" in outcome.content
