@@ -81,6 +81,12 @@ class BashTool:
                 ["bash", "-c", command],
                 capture_output=True,
                 text=True,
+                # Replace invalid bytes with U+FFFD instead of raising.
+                # Without this, any non-UTF-8 byte in stdout (binary
+                # files, locale-encoded paths, truncated multibyte
+                # sequences) crashes the tool and propagates out as an
+                # AgentError that ends the rollout.
+                errors="replace",
                 timeout=timeout,
                 cwd=context.cwd or None,
             )
