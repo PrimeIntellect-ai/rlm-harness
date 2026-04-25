@@ -65,6 +65,7 @@ All configuration is via environment variables:
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
 | `RLM_TOOLS` | `ipython,summarize` | Comma-separated subset of builtin tools to enable. Empty string = no tools. Unknown names raise. |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
+| `RLM_SDK_MAX_RETRIES` | `5` | Per-request retry count passed to the OpenAI SDK (in addition to the call-site retry wrapper that rides out longer outages). |
 
 `RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `rlm --model gpt-5-mini --max-turns 50 --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
