@@ -10,7 +10,7 @@ from pathlib import Path
 
 from openai import AsyncOpenAI
 
-from rlm.client import extract_usage, make_client
+from rlm.client import call_with_retries, extract_usage, make_client
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -256,7 +256,8 @@ class RLMEngine:
             if active_tools:
                 request_kwargs["tools"] = active_tools
                 request_kwargs["parallel_tool_calls"] = False
-            response = await self.client.chat.completions.create(
+            response = await call_with_retries(
+                self.client.chat.completions.create,
                 **request_kwargs,
             )
 
@@ -425,7 +426,8 @@ class RLMEngine:
         if self._repl is not None:
             checkpoint_prompt += REPL_RESTART_NOTE
         messages.append({"role": "user", "content": checkpoint_prompt})
-        response = await self.client.chat.completions.create(
+        response = await call_with_retries(
+            self.client.chat.completions.create,
             model=self.model,
             messages=messages,
         )
