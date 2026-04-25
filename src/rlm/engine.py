@@ -133,8 +133,7 @@ def _parse_summarize_at_tokens(
             parsed = (ints[0], ints[1])
         else:
             raise ValueError(
-                f"summarize_at_tokens string must have 1 or 2 ints "
-                f"(got {value!r})"
+                f"summarize_at_tokens string must have 1 or 2 ints (got {value!r})"
             )
     elif isinstance(value, int):
         parsed = value
@@ -160,9 +159,7 @@ def _parse_summarize_at_tokens(
             f"summarize_at_tokens values must be positive (got lo={lo}, hi={hi})"
         )
     if lo > hi:
-        raise ValueError(
-            f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})"
-        )
+        raise ValueError(f"summarize_at_tokens lo must be <= hi (got lo={lo}, hi={hi})")
     return parsed
 
 
