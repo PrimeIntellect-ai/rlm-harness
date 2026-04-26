@@ -180,6 +180,7 @@ class RLMEngine:
 
         # Metrics
         self._metrics = RLMMetrics()
+        self._metrics._sub_rlm_enabled = self.max_depth > 0
 
         self._tool_state: dict[str, object] = {}
 

@@ -243,6 +243,7 @@ class RLMMetrics:
     _sub_rlm_branch_input_tokens_max: int = field(default=0, repr=False)
     _sub_rlm_branch_output_tokens_sum: int = field(default=0, repr=False)
     _sub_rlm_branch_output_tokens_max: int = field(default=0, repr=False)
+    _sub_rlm_enabled: bool = field(default=False, repr=False)
 
     def note_root_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
         self._root_input_tokens = prompt_tokens
@@ -395,8 +396,12 @@ class RLMMetrics:
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
+        sub_rlm_enabled = self._sub_rlm_enabled
         return {
-            key: value for key, value in asdict(self).items() if not key.startswith("_")
+            key: value
+            for key, value in asdict(self).items()
+            if not key.startswith("_")
+            and (sub_rlm_enabled or not key.startswith("sub_rlm_"))
         }
 
 
