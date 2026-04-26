@@ -45,15 +45,13 @@ CHECKPOINT_COMPACTION_PROMPT = (
 )
 
 # Appended to the checkpoint prompt when the IPython REPL is active.
-# The kernel is restarted on compaction, so the next LLM inherits an
-# empty Python state — flag this so the summary captures anything the
-# next LLM would otherwise need to rebuild from scratch.
 REPL_RESTART_NOTE = (
     "\n\n"
     "Note: the IPython kernel will be restarted after this summary. "
-    "All Python variables, imports, loaded data, and in-memory state "
-    "will be wiped. Capture anything the next LLM needs to re-establish "
-    "(key values, file paths, loaded datasets, etc.) in the summary itself."
+    "Python variables, imports, loaded data, and in-memory state will "
+    "be wiped. Files on disk and any external side effects you've "
+    "already produced are preserved — capture file paths and what's "
+    "in them so the next LLM can pick up without re-doing work."
 )
 
 # Wrapper text that frames the summary as the sole user-facing context
