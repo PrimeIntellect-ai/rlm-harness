@@ -28,17 +28,25 @@ _RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 
 
 def make_client() -> AsyncOpenAI:
-    """Create an AsyncOpenAI client from environment variables."""
+    """Create an AsyncOpenAI client from environment variables.
+
+    Tags every outbound request with ``X-RLM-Depth: <RLM_DEPTH>`` so an
+    interceptor (e.g. verifiers' interception server) can distinguish
+    parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
+    decide whether to record them in the rollout's trajectory.
+    """
     base_url = os.environ.get("RLM_BASE_URL")
     api_key = (
         os.environ.get("RLM_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or os.environ.get("ANTHROPIC_API_KEY")
     )
+    depth = os.environ.get("RLM_DEPTH", "0")
     return AsyncOpenAI(
         base_url=base_url,
         api_key=api_key,
         max_retries=int(os.environ.get("RLM_SDK_MAX_RETRIES", 5)),
+        default_headers={"X-RLM-Depth": depth},
     )
 
 
