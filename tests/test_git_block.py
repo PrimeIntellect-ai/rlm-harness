@@ -100,15 +100,115 @@ def test_ipython_non_git_shell_escape_unaffected():
     assert find_blocked_in_ipython("!ls -la") is None
 
 
-def test_ipython_subprocess_run_documented_bypass():
-    # Pure-Python subprocess calls are NOT detected (documented limitation).
-    code = "import subprocess; subprocess.run(['git', 'status'])"
-    assert find_blocked_in_ipython(code) is None
-
-
 def test_ipython_allow_git_env_var(monkeypatch):
     monkeypatch.setenv("RLM_ALLOW_GIT", "1")
     assert find_blocked_in_ipython("!git status") is None
+
+
+# --- find_blocked_python (AST-based detection of Python git invocations) ---
+
+
+def test_python_subprocess_run_list_blocked():
+    code = "import subprocess\nsubprocess.run(['git', 'log'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_run_shell_string_blocked():
+    code = "import subprocess\nsubprocess.run('git log', shell=True)"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_popen_blocked():
+    code = "import subprocess\nsubprocess.Popen(['git', 'diff'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_call_blocked():
+    code = "import subprocess\nsubprocess.call(['git', 'status'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_check_call_blocked():
+    code = "import subprocess\nsubprocess.check_call(['git', 'status'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_check_output_blocked():
+    code = "import subprocess\nsubprocess.check_output(['git', 'log'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_os_system_blocked():
+    assert find_blocked_in_ipython("import os\nos.system('git fetch')") == "git"
+
+
+def test_python_os_popen_blocked():
+    assert find_blocked_in_ipython("import os\nos.popen('git status')") == "git"
+
+
+def test_python_subprocess_module_alias_blocked():
+    code = "import subprocess as sp\nsp.run(['git', 'status'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_from_subprocess_import_run_blocked():
+    code = "from subprocess import run\nrun(['git', 'log'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_single_hop_assignment_alias_blocked():
+    code = "import subprocess\nr = subprocess.run\nr(['git', 'log'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_run_non_git_unaffected():
+    code = "import subprocess\nsubprocess.run(['pytest'])"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_string_literal_no_call_unaffected():
+    assert find_blocked_in_ipython("x = 'git status'") is None
+
+
+def test_python_command_starting_with_git_word_unaffected():
+    # "github" is not the git binary; first arg literal "github" must not match.
+    code = "import subprocess\nsubprocess.run(['github', 'status'])"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_shell_string_with_leading_whitespace_blocked():
+    # Whitespace in front of the string still resolves first token to "git".
+    code = "import subprocess\nsubprocess.run('   git log', shell=True)"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_allow_git_env_var_disables_ast(monkeypatch):
+    monkeypatch.setenv("RLM_ALLOW_GIT", "1")
+    code = "import subprocess\nsubprocess.run(['git', 'log'])"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_getattr_documented_bypass():
+    # Dynamic attribute lookup is intentionally NOT caught — pin behavior.
+    code = "import subprocess\ngetattr(subprocess, 'run')(['git', 'log'])"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_dunder_import_documented_bypass():
+    # ``__import__("subprocess").run(...)`` is also not caught.
+    code = "__import__('subprocess').run(['git', 'log'])"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_multi_hop_alias_documented_bypass():
+    # Two-hop reassignment is out of scope; r2 isn't tracked back to subprocess.run.
+    code = "import subprocess\nr1 = subprocess.run\nr2 = r1\nr2(['git', 'log'])\n"
+    assert find_blocked_in_ipython(code) is None
+
+
+def test_python_syntax_error_does_not_refuse():
+    # Malformed Python: AST scan returns None so the REPL surfaces the SyntaxError.
+    assert find_blocked_in_ipython("def broken(:\n    pass") is None
 
 
 # --- BashTool integration ---
