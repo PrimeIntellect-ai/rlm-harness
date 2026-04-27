@@ -8,7 +8,7 @@ import os
 import time
 from pathlib import Path
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
 from rlm.prompt import build_system_prompt
@@ -64,6 +64,12 @@ POST_COMPACTION_FRAMING = (
     "the summary produced by the other language model, use the "
     "information in this summary to assist with your own analysis:"
 )
+
+
+def _is_request_too_large(e: BadRequestError) -> bool:
+    """True if a 400 matches the proxy's "Request Entity Too Large" body."""
+    haystack = f"{e} {getattr(e, 'body', '') or ''}".lower()
+    return "request entity too large" in haystack
 
 
 def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
@@ -255,10 +261,17 @@ class RLMEngine:
             if active_tools:
                 request_kwargs["tools"] = active_tools
                 request_kwargs["parallel_tool_calls"] = False
-            response = await call_with_retries(
-                self.client.chat.completions.create,
-                **request_kwargs,
-            )
+            try:
+                response = await call_with_retries(
+                    self.client.chat.completions.create,
+                    **request_kwargs,
+                )
+            except BadRequestError as e:
+                if not _is_request_too_large(e):
+                    raise
+                self._metrics.stop_reason = "request_too_large"
+                final_text = "[request body too large]"
+                break
 
             usage = extract_usage(response)
             self._total_usage.prompt_tokens += usage.prompt_tokens
@@ -380,7 +393,14 @@ class RLMEngine:
                 self.summarize_at_tokens is not None
                 and usage.prompt_tokens >= self.summarize_at_tokens
             ):
-                await self._compact_branch(messages, turn)
+                try:
+                    await self._compact_branch(messages, turn)
+                except BadRequestError as e:
+                    if not _is_request_too_large(e):
+                        raise
+                    self._metrics.stop_reason = "request_too_large"
+                    final_text = "[request body too large]"
+                    break
         else:
             self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"

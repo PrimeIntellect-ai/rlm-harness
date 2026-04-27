@@ -213,7 +213,7 @@ class RLMMetrics:
     sub_rlm_programmatic_tool_calls_python: int = 0
     sub_rlm_programmatic_tool_calls_bash: int = 0
 
-    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "depth_limit"
+    stop_reason: str = ""  # "done", "max_turns", "token_budget", "multiple_tool_calls", "invalid_tool_args", "depth_limit", "request_too_large"
 
     @property
     def turns(self) -> int:
