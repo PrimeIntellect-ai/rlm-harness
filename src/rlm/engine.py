@@ -67,14 +67,9 @@ POST_COMPACTION_FRAMING = (
 
 
 def _is_request_too_large(exc: BadRequestError) -> bool:
-    """True if a 400 indicates the request body / context is too large.
-
-    Matches both the proxy's "Request Entity Too Large" body and the
-    standard OpenAI ``context_length_exceeded`` error code.
-    """
-    needles = ("too large", "too long", "context_length_exceeded")
+    """True if a 400 matches the proxy's "Request Entity Too Large" body."""
     haystack = f"{exc} {getattr(exc, 'body', '') or ''}".lower()
-    return any(needle in haystack for needle in needles)
+    return "request entity too large" in haystack
 
 
 def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
