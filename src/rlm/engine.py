@@ -270,7 +270,6 @@ class RLMEngine:
                 if not _is_request_too_large(e):
                     raise
                 self._metrics.stop_reason = "request_too_large"
-                final_text = "[request body too large]"
                 break
 
             usage = extract_usage(response)
