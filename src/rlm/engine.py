@@ -66,9 +66,9 @@ POST_COMPACTION_FRAMING = (
 )
 
 
-def _is_request_too_large(exc: BadRequestError) -> bool:
+def _is_request_too_large(e: BadRequestError) -> bool:
     """True if a 400 matches the proxy's "Request Entity Too Large" body."""
-    haystack = f"{exc} {getattr(exc, 'body', '') or ''}".lower()
+    haystack = f"{e} {getattr(e, 'body', '') or ''}".lower()
     return "request entity too large" in haystack
 
 
@@ -266,8 +266,8 @@ class RLMEngine:
                     self.client.chat.completions.create,
                     **request_kwargs,
                 )
-            except BadRequestError as exc:
-                if not _is_request_too_large(exc):
+            except BadRequestError as e:
+                if not _is_request_too_large(e):
                     raise
                 self._metrics.stop_reason = "request_too_large"
                 final_text = "[request body too large]"
@@ -395,8 +395,8 @@ class RLMEngine:
             ):
                 try:
                     await self._compact_branch(messages, turn)
-                except BadRequestError as exc:
-                    if not _is_request_too_large(exc):
+                except BadRequestError as e:
+                    if not _is_request_too_large(e):
                         raise
                     self._metrics.stop_reason = "request_too_large"
                     final_text = "[request body too large]"
