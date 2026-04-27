@@ -12,6 +12,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
+from rlm.tools.git_block import find_blocked_in_ipython, refusal
 from rlm.tools.skills import get_installed_skills
 from rlm.types import IpythonExecuted
 
@@ -90,6 +91,13 @@ class IpythonTool:
         if context.repl is None:
             return ToolOutcome(
                 content="Error: IPython REPL is not available",
+                metric_events=metric_events,
+            )
+
+        blocked = find_blocked_in_ipython(code)
+        if blocked is not None:
+            return ToolOutcome(
+                content=refusal(blocked),
                 metric_events=metric_events,
             )
 
