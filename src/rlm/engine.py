@@ -251,6 +251,11 @@ class RLMEngine:
 
         final_text = ""
         turn = 0
+        # Role of whatever the engine appended to ``messages`` since the
+        # last API call. Drives RLMMetrics.note_assistant_turn's tool-token
+        # attribution: only "tool" appendages count toward total_tool_response_tokens.
+        # ``None`` on the very first turn and after compaction (fresh branch).
+        last_appended_role: str | None = None
 
         for turn in range(self.max_turns):
             # Call LLM
@@ -286,6 +291,7 @@ class RLMEngine:
             self._metrics.note_assistant_turn(
                 usage.prompt_tokens,
                 usage.completion_tokens,
+                prev_appended_role=last_appended_role,
             )
 
             # Update metrics
@@ -381,6 +387,7 @@ class RLMEngine:
                     "content": result,
                 }
             )
+            last_appended_role = "tool"
 
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
@@ -401,6 +408,9 @@ class RLMEngine:
                     self._metrics.stop_reason = "request_too_large"
                     final_text = "[request body too large]"
                     break
+                # Branch boundary: the next API call's prompt is a fresh
+                # [system, user(framing+summary)], not a continuation.
+                last_appended_role = None
         else:
             self._metrics.stop_reason = "max_turns"
             final_text = msg.content or "[max turns reached]"
