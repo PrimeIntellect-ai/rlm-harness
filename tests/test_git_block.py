@@ -204,6 +204,30 @@ def test_python_shell_string_with_leading_whitespace_blocked():
     assert find_blocked_in_ipython(code) == "git"
 
 
+def test_python_timeit_cell_magic_with_python_git_call_blocked():
+    # %%timeit's body is Python; the AST scan must still see it.
+    code = '%%timeit\nimport subprocess\nsubprocess.run(["git", "log"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_capture_cell_magic_with_python_git_call_blocked():
+    code = '%%capture\nimport subprocess\nsubprocess.run(["git", "status"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_writefile_cell_magic_with_python_git_call_blocked():
+    code = '%%writefile out.txt\nimport subprocess\nsubprocess.run(["git", "log"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_double_percent_in_string_does_not_drop_later_git_call():
+    # `%%foo`-shaped line inside a triple-quoted string must not poison
+    # the rest of the cell — the git call after the string must still
+    # be detected.
+    code = 's = """\n%%foo\n"""\nimport subprocess\nsubprocess.run(["git", "log"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
 def test_python_allow_git_env_var_disables_ast(monkeypatch):
     monkeypatch.setenv("RLM_ALLOW_GIT", "1")
     code = "import subprocess\nsubprocess.run(['git', 'log'])"

@@ -221,12 +221,14 @@ def _strip_ipython_only(code: str) -> str:
     preserved verbatim.
     """
     out: list[str] = []
-    in_cell_magic = False
     for line in code.splitlines():
-        if in_cell_magic:
-            continue
+        # Drop only the cell-magic HEADER, not the body — magics like
+        # ``%%timeit`` / ``%%capture`` execute their body as Python and
+        # would otherwise hide ``subprocess.run([\"git\", ...])`` calls.
+        # Bash-bodied magics (``%%bash`` / ``%%sh``) are caught earlier
+        # by the shell-escape pre-pass, so dropping just the header here
+        # is safe.
         if _ANY_CELL_MAGIC_RE.match(line):
-            in_cell_magic = True
             continue
         if _SHELL_ESCAPE_RE.match(line) or _ANY_LINE_MAGIC_RE.match(line):
             continue
