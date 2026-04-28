@@ -166,6 +166,28 @@ def test_python_subprocess_run_non_git_unaffected():
     assert find_blocked_in_ipython(code) is None
 
 
+def test_python_os_system_chained_git_blocked():
+    # `os.system("cd /tmp && git log")` must be refused the same way
+    # `cd /tmp && git log` is refused via the bash tool.
+    code = 'import os\nos.system("cd /tmp && git log")'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_shell_string_chained_git_blocked():
+    code = 'import subprocess\nsubprocess.run("echo hi; git log", shell=True)'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_os_popen_pipe_chained_git_blocked():
+    code = 'import os\nos.popen("echo a | git status")'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_subprocess_string_or_chained_git_blocked():
+    code = 'import subprocess\nsubprocess.run("false || git log", shell=True)'
+    assert find_blocked_in_ipython(code) == "git"
+
+
 def test_python_string_literal_no_call_unaffected():
     assert find_blocked_in_ipython("x = 'git status'") is None
 

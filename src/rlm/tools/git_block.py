@@ -119,13 +119,19 @@ _BLOCKED_PY_CALLS = frozenset(
 
 
 def _first_arg_starts_with_git(node: ast.Call) -> bool:
-    """Return True iff ``node.args[0]`` is a literal that begins with ``git``."""
+    """Return True iff ``node.args[0]`` is a literal that invokes ``git``.
+
+    String args go through ``find_blocked_command`` so the same separator
+    splitting (``&&``, ``||``, ``;``, ``|``) applies as for direct bash
+    invocations — ``os.system("cd /tmp && git log")`` is refused
+    symmetrically. List/tuple args are argv with no shell parsing, so
+    only the first element matters.
+    """
     if not node.args:
         return False
     arg = node.args[0]
     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-        tokens = arg.value.strip().split()
-        return bool(tokens) and tokens[0] in _BLOCKED
+        return find_blocked_command(arg.value) is not None
     if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
         first = arg.elts[0]
         return (
