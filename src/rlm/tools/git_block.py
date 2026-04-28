@@ -60,6 +60,11 @@ _SHELL_ESCAPE_RE = re.compile(r"^\s*!{1,2}(?P<rest>.*)$")
 _SHELL_LINE_MAGIC_RE = re.compile(r"^\s*%(?:sx|system)\s+(?P<rest>.*)$")
 # ``%%bash`` / ``%%sh`` cell magic header — the whole cell body is shell.
 _SHELL_CELL_MAGIC_RE = re.compile(r"^\s*%%(?:bash|sh)\b")
+# Any IPython line magic — used by the AST pre-pass to drop ipython-only
+# lines so ``ast.parse`` doesn't choke on them.
+_ANY_LINE_MAGIC_RE = re.compile(r"^\s*%[A-Za-z]")
+# Any IPython cell magic header — same purpose.
+_ANY_CELL_MAGIC_RE = re.compile(r"^\s*%%[A-Za-z]")
 
 
 def find_blocked_in_ipython(code: str) -> str | None:
@@ -199,17 +204,46 @@ class _GitCallFinder(ast.NodeVisitor):
         return None
 
 
+def _strip_ipython_only(code: str) -> str:
+    """Drop ipython-only lines so the remainder is pure Python for ``ast.parse``.
+
+    Removes ``!cmd`` / ``!!cmd`` shell escapes, line magics (``%foo``),
+    and any ``%%cellmagic`` header plus its body. Trailing ``?`` / ``??``
+    object-inspection markers are stripped from the line tail rather
+    than dropping the whole line, so ``subprocess.run?`` becomes
+    ``subprocess.run`` and still parses. All other Python lines are
+    preserved verbatim.
+    """
+    out: list[str] = []
+    in_cell_magic = False
+    for line in code.splitlines():
+        if in_cell_magic:
+            continue
+        if _ANY_CELL_MAGIC_RE.match(line):
+            in_cell_magic = True
+            continue
+        if _SHELL_ESCAPE_RE.match(line) or _ANY_LINE_MAGIC_RE.match(line):
+            continue
+        stripped = line.rstrip()
+        if stripped.endswith("?"):
+            line = stripped.rstrip("?")
+        out.append(line)
+    return "\n".join(out)
+
+
 def find_blocked_python(code: str) -> str | None:
     """Detect pure-Python git invocations in an ipython cell via AST walk.
 
     Returns the offending token (``\"git\"``) if a blocked call is found,
-    else ``None``. Honors ``RLM_ALLOW_GIT=1``. Returns ``None`` on
-    ``SyntaxError`` so the normal exec path surfaces the parse error.
+    else ``None``. Honors ``RLM_ALLOW_GIT=1``. Ipython-only syntax
+    (``!cmd``, ``%magic``, ``obj?``) is stripped before parsing so
+    cells mixing ipython and Python still get scanned. Returns ``None``
+    on ``SyntaxError`` so the normal exec path surfaces the parse error.
     """
     if allow_git():
         return None
     try:
-        tree = ast.parse(code)
+        tree = ast.parse(_strip_ipython_only(code))
     except SyntaxError:
         return None
     finder = _GitCallFinder()

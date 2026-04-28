@@ -211,6 +211,34 @@ def test_python_syntax_error_does_not_refuse():
     assert find_blocked_in_ipython("def broken(:\n    pass") is None
 
 
+# --- ipython-only syntax must not bypass the AST scan (bugbot #3150728431) ---
+
+
+def test_python_shell_escape_with_python_git_call_blocked():
+    # The bugbot reproducer: a ``!cmd`` line previously made ``ast.parse``
+    # raise ``SyntaxError``, silently bypassing the Python-call scan.
+    code = '!ls\nimport subprocess\nsubprocess.run(["git", "log", "--all"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_line_magic_with_python_git_call_blocked():
+    code = '%timeit pass\nimport subprocess\nsubprocess.run(["git", "status"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_help_question_mark_with_python_git_call_blocked():
+    # ``obj?`` object-inspection syntax is ipython-only; strip the ``?``
+    # rather than the line so ``subprocess.run`` still binds the alias path.
+    code = "import subprocess\nsubprocess.run?\nsubprocess.run(['git', 'log'])"
+    assert find_blocked_in_ipython(code) == "git"
+
+
+def test_python_alias_then_magic_then_call_blocked():
+    # Alias defined before a magic that previously broke ``ast.parse``.
+    code = 'import subprocess as sp\n!ls\nsp.run(["git", "status"])'
+    assert find_blocked_in_ipython(code) == "git"
+
+
 # --- BashTool integration ---
 
 
