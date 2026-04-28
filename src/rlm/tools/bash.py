@@ -13,6 +13,7 @@ import subprocess
 from typing import Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
+from rlm.tools.git_block import find_blocked_command, refusal
 
 
 BASH_TIMEOUT_MAX_SECONDS = 600
@@ -75,6 +76,10 @@ class BashTool:
             except (TypeError, ValueError):
                 timeout = context.exec_timeout
         timeout = min(timeout, BASH_TIMEOUT_MAX_SECONDS)
+
+        blocked = find_blocked_command(command)
+        if blocked is not None:
+            return ToolOutcome(content=refusal(blocked))
 
         try:
             proc = subprocess.run(
