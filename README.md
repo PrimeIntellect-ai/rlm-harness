@@ -1,4 +1,6 @@
-# rlm
+# rlm - training
+
+⚠️ this is a training only harness, only use this to train on agentic task using verifiers 
 
 A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
