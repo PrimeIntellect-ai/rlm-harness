@@ -95,7 +95,9 @@ async def test_unknown_tool_lenient_with_env(session, register_add_tool, monkeyp
     assert engine._metrics.stop_reason == "done"
 
 
-async def test_invalid_tool_args_lenient_with_env(session, register_add_tool, monkeypatch):
+async def test_invalid_tool_args_lenient_with_env(
+    session, register_add_tool, monkeypatch
+):
     """RLM_ALLOW_INVALID_TOOL_CALLS=1: parse error is fed back and the loop continues."""
     monkeypatch.setenv("RLM_ALLOW_INVALID_TOOL_CALLS", "1")
     prompt = "add 2 and 3"
