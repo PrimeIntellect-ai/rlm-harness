@@ -172,6 +172,7 @@ class RLMEngine:
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
+        self.allow_unknown_tool = os.environ.get("RLM_ALLOW_UNKNOWN_TOOL") == "1"
 
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
@@ -365,6 +366,10 @@ class RLMEngine:
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
+                if not self.allow_unknown_tool:
+                    self._metrics.stop_reason = "unknown_tool"
+                    final_text = f"[unknown tool '{tool_name}']"
+                    break
                 tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
             else:
                 tool_result = await asyncio.to_thread(
