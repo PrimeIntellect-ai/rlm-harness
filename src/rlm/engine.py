@@ -172,7 +172,9 @@ class RLMEngine:
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-        self.allow_unknown_tool = os.environ.get("RLM_ALLOW_UNKNOWN_TOOL") == "1"
+        self.allow_invalid_tool_calls = (
+            os.environ.get("RLM_ALLOW_INVALID_TOOL_CALLS") == "1"
+        )
 
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
@@ -329,18 +331,25 @@ class RLMEngine:
                 )
                 break
 
-            # Malformed tool-call arguments: fail the rollout so training
-            # penalises the mistake. Final_text + stop_reason make the failure
-            # visible to the verifiers harness without raising an exception.
             if msg.tool_calls and parsed_args[0] is None:
-                tool_name = msg.tool_calls[0].function.name
+                tc = msg.tool_calls[0]
+                tool_name = tc.function.name
                 err_info = tool_calls_log[0]["args"]
-                self._metrics.stop_reason = "invalid_tool_args"
-                final_text = (
-                    f"[invalid JSON arguments for tool '{tool_name}': "
-                    f"{err_info['_parse_error']}]"
+                error_content = (
+                    f"invalid JSON arguments for tool '{tool_name}': "
+                    f"{err_info['_parse_error']}"
                 )
-                break
+                if not self.allow_invalid_tool_calls:
+                    self._metrics.stop_reason = "invalid_tool_args"
+                    final_text = f"[{error_content}]"
+                    break
+                feedback = f"Error: {error_content}"
+                self.session.log_tool_result(turn, tool_name, feedback, 0.0)
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                )
+                last_appended_role = "tool"
+                continue
 
             # Token budget check
             if (
@@ -366,7 +375,7 @@ class RLMEngine:
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
-                if not self.allow_unknown_tool:
+                if not self.allow_invalid_tool_calls:
                     self._metrics.stop_reason = "unknown_tool"
                     final_text = f"[unknown tool '{tool_name}']"
                     break

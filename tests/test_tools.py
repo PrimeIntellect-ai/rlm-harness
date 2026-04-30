@@ -75,8 +75,8 @@ async def test_unknown_tool_terminates(session, register_add_tool):
 
 
 async def test_unknown_tool_lenient_with_env(session, register_add_tool, monkeypatch):
-    """RLM_ALLOW_UNKNOWN_TOOL=1: error is fed back and the loop continues."""
-    monkeypatch.setenv("RLM_ALLOW_UNKNOWN_TOOL", "1")
+    """RLM_ALLOW_INVALID_TOOL_CALLS=1: unknown-tool error is fed back and the loop continues."""
+    monkeypatch.setenv("RLM_ALLOW_INVALID_TOOL_CALLS", "1")
     prompt = "do something"
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("ipytron", {})]),
@@ -90,6 +90,27 @@ async def test_unknown_tool_lenient_with_env(session, register_add_tool, monkeyp
 
     assert len(client.calls) == 2
     assert "Error: unknown tool 'ipytron'" in tool_result(client)
+    assert result.answer == "ok, giving up"
+    assert result.turns == 2
+    assert engine._metrics.stop_reason == "done"
+
+
+async def test_invalid_tool_args_lenient_with_env(session, register_add_tool, monkeypatch):
+    """RLM_ALLOW_INVALID_TOOL_CALLS=1: parse error is fed back and the loop continues."""
+    monkeypatch.setenv("RLM_ALLOW_INVALID_TOOL_CALLS", "1")
+    prompt = "add 2 and 3"
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("add", "not-valid-json")]),
+        DummyMessage(content="ok, giving up"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    result = await engine.run(prompt)
+
+    assert len(client.calls) == 2
+    assert "Error: invalid JSON arguments for tool 'add'" in tool_result(client)
     assert result.answer == "ok, giving up"
     assert result.turns == 2
     assert engine._metrics.stop_reason == "done"
