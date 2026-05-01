@@ -325,9 +325,7 @@ class RLMEngine:
             if msg.tool_calls and len(msg.tool_calls) > 1:
                 if self.strict_tool_calls:
                     self._metrics.stop_reason = "multiple_tool_calls"
-                    final_text = (
-                        "[emitted multiple tool calls in one turn; at most 1 is allowed]"
-                    )
+                    final_text = "[emitted multiple tool calls in one turn; at most 1 is allowed]"
                     break
                 feedback = "Error: only one tool call per turn allowed"
                 for tc in msg.tool_calls:
