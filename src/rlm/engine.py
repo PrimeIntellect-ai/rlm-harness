@@ -172,7 +172,6 @@ class RLMEngine:
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-        self.strict_tool_calls = os.environ.get("RLM_STRICT_TOOL_CALLS") == "1"
 
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
@@ -323,10 +322,6 @@ class RLMEngine:
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
-                if self.strict_tool_calls:
-                    self._metrics.stop_reason = "multiple_tool_calls"
-                    final_text = "[emitted multiple tool calls in one turn; at most 1 is allowed]"
-                    break
                 feedback = "Error: only one tool call per turn allowed"
                 for tc in msg.tool_calls:
                     self.session.log_tool_result(turn, tc.function.name, feedback, 0.0)
@@ -340,15 +335,10 @@ class RLMEngine:
                 tc = msg.tool_calls[0]
                 tool_name = tc.function.name
                 err_info = tool_calls_log[0]["args"]
-                error_content = (
-                    f"invalid JSON arguments for tool '{tool_name}': "
+                feedback = (
+                    f"Error: invalid JSON arguments for tool '{tool_name}': "
                     f"{err_info['_parse_error']}"
                 )
-                if self.strict_tool_calls:
-                    self._metrics.stop_reason = "invalid_tool_args"
-                    final_text = f"[{error_content}]"
-                    break
-                feedback = f"Error: {error_content}"
                 self.session.log_tool_result(turn, tool_name, feedback, 0.0)
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": feedback}
@@ -371,19 +361,12 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call (reuse parsed args from above;
-            # parse failures have already broken the loop, so parsed_args[0] is
-            # guaranteed to be a dict here).
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
             tool_args = parsed_args[0]
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
-                if self.strict_tool_calls:
-                    self._metrics.stop_reason = "unknown_tool"
-                    final_text = f"[unknown tool '{tool_name}']"
-                    break
                 tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
             else:
                 tool_result = await asyncio.to_thread(

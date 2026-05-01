@@ -2,8 +2,7 @@
 
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a dummy
 ``add(a, b)`` tool (registered per-test, not part of the package) to
-exercise how the harness reacts to model tool-call behavior across
-both default-lenient and ``RLM_STRICT_TOOL_CALLS=1`` modes.
+exercise how the harness reacts to model tool-call behavior.
 """
 
 from __future__ import annotations
@@ -58,23 +57,6 @@ async def test_invalid_tool_args(session, register_add_tool):
     assert result.turns == 2
 
 
-async def test_invalid_tool_args_strict(session, register_add_tool, monkeypatch):
-    """RLM_STRICT_TOOL_CALLS=1: rollout short-circuits with stop_reason=invalid_tool_args."""
-    monkeypatch.setenv("RLM_STRICT_TOOL_CALLS", "1")
-    prompt = "add 2 and 3"
-    messages = [DummyMessage(tool_calls=[DummyToolCall("add", "not-valid-json")])]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert len(client.calls) == 1
-    assert "invalid JSON arguments" in result.answer
-    assert result.turns == 1
-    assert engine._metrics.stop_reason == "invalid_tool_args"
-
-
 async def test_unknown_tool(session, register_add_tool):
     """Default (lenient): unknown-tool error is fed back and the loop continues."""
     prompt = "do something"
@@ -92,23 +74,6 @@ async def test_unknown_tool(session, register_add_tool):
     assert "Error: unknown tool 'ipytron'" in tool_result(client)
     assert result.answer == "ok, giving up"
     assert result.turns == 2
-
-
-async def test_unknown_tool_strict(session, register_add_tool, monkeypatch):
-    """RLM_STRICT_TOOL_CALLS=1: rollout short-circuits with stop_reason=unknown_tool."""
-    monkeypatch.setenv("RLM_STRICT_TOOL_CALLS", "1")
-    prompt = "do something"
-    messages = [DummyMessage(tool_calls=[DummyToolCall("ipytron", {})])]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert len(client.calls) == 1
-    assert "unknown tool 'ipytron'" in result.answer
-    assert result.turns == 1
-    assert engine._metrics.stop_reason == "unknown_tool"
 
 
 async def test_multiple_tool_calls(session, register_add_tool):
@@ -139,30 +104,6 @@ async def test_multiple_tool_calls(session, register_add_tool):
     assert {m["tool_call_id"] for m in tool_messages} == {"call_0", "call_1"}
     assert result.answer == "ok, giving up"
     assert result.turns == 2
-
-
-async def test_multiple_tool_calls_strict(session, register_add_tool, monkeypatch):
-    """RLM_STRICT_TOOL_CALLS=1: rollout short-circuits with stop_reason=multiple_tool_calls."""
-    monkeypatch.setenv("RLM_STRICT_TOOL_CALLS", "1")
-    prompt = "add things"
-    messages = [
-        DummyMessage(
-            tool_calls=[
-                DummyToolCall("add", {"a": 1, "b": 2}, id="call_0"),
-                DummyToolCall("add", {"a": 3, "b": 4}, id="call_1"),
-            ]
-        )
-    ]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert len(client.calls) == 1
-    assert "multiple tool calls" in result.answer
-    assert result.turns == 1
-    assert engine._metrics.stop_reason == "multiple_tool_calls"
 
 
 async def test_tool_raises(session, register_boom_tool):
