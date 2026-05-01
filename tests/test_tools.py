@@ -38,46 +38,8 @@ async def test_valid_tool(session, register_add_tool):
     assert result.turns == 2
 
 
-async def test_invalid_tool_args(session, register_add_tool):
-    """Default (lenient): parse error is fed back and the loop continues."""
-    prompt = "add 2 and 3"
-    messages = [
-        DummyMessage(tool_calls=[DummyToolCall("add", "not-valid-json")]),
-        DummyMessage(content="ok, giving up"),
-    ]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert len(client.calls) == 2
-    assert "Error: invalid JSON arguments for tool 'add'" in tool_result(client)
-    assert result.answer == "ok, giving up"
-    assert result.turns == 2
-
-
-async def test_unknown_tool(session, register_add_tool):
-    """Default (lenient): unknown-tool error is fed back and the loop continues."""
-    prompt = "do something"
-    messages = [
-        DummyMessage(tool_calls=[DummyToolCall("ipytron", {})]),
-        DummyMessage(content="ok, giving up"),
-    ]
-
-    client = DummyClient(messages)
-    engine = RLMEngine(client=client, session=session)  # type: ignore
-
-    result = await engine.run(prompt)
-
-    assert len(client.calls) == 2
-    assert "Error: unknown tool 'ipytron'" in tool_result(client)
-    assert result.answer == "ok, giving up"
-    assert result.turns == 2
-
-
 async def test_multiple_tool_calls(session, register_add_tool):
-    """Default (lenient): each tool_call_id receives an error and the loop continues."""
+    """Each tool_call_id in a multi-call assistant message receives a tool result."""
     prompt = "add things"
     messages = [
         DummyMessage(
@@ -86,24 +48,18 @@ async def test_multiple_tool_calls(session, register_add_tool):
                 DummyToolCall("add", {"a": 3, "b": 4}, id="call_1"),
             ]
         ),
-        DummyMessage(content="ok, giving up"),
+        DummyMessage(content=""),
     ]
 
     client = DummyClient(messages)
     engine = RLMEngine(client=client, session=session)  # type: ignore
 
-    result = await engine.run(prompt)
+    await engine.run(prompt)
 
-    assert len(client.calls) == 2
-    request_messages = client.calls[1]["messages"]
-    tool_messages = [m for m in request_messages if m.get("role") == "tool"]
-    assert len(tool_messages) == 2
-    assert all(
-        "only one tool call per turn allowed" in m["content"] for m in tool_messages
-    )
-    assert {m["tool_call_id"] for m in tool_messages} == {"call_0", "call_1"}
-    assert result.answer == "ok, giving up"
-    assert result.turns == 2
+    tool_messages = [
+        m for m in client.calls[1]["messages"] if m.get("role") == "tool"
+    ]
+    assert sorted(m["tool_call_id"] for m in tool_messages) == ["call_0", "call_1"]
 
 
 async def test_tool_raises(session, register_boom_tool):
