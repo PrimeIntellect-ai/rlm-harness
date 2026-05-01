@@ -2,10 +2,7 @@
 
 Drives ``rlm.engine.RLMEngine`` with a scripted DummyClient and a dummy
 ``add(a, b)`` tool (registered per-test, not part of the package) to
-exercise how the harness reacts to model tool-call behavior:
-
-- valid tool call   → dispatched, result fed back as a ``tool`` message
-- invalid tool call → loop short-circuits, final answer reports the error
+exercise how the harness reacts to model tool-call behavior.
 """
 
 from __future__ import annotations
@@ -41,21 +38,26 @@ async def test_valid_tool(session, register_add_tool):
     assert result.turns == 2
 
 
-async def test_invalid_tool_args(session, register_add_tool):
-    """Malformed JSON in a tool call: rollout short-circuits with an error answer."""
-    prompt = "add 2 and 3"
-    messages = [DummyMessage(tool_calls=[DummyToolCall("add", "not-valid-json")])]
+async def test_multiple_tool_calls(session, register_add_tool):
+    """Each tool_call_id in a multi-call assistant message receives a tool result."""
+    prompt = "add things"
+    messages = [
+        DummyMessage(
+            tool_calls=[
+                DummyToolCall("add", {"a": 1, "b": 2}, id="call_0"),
+                DummyToolCall("add", {"a": 3, "b": 4}, id="call_1"),
+            ]
+        ),
+        DummyMessage(content=""),
+    ]
 
     client = DummyClient(messages)
     engine = RLMEngine(client=client, session=session)  # type: ignore
 
-    result = await engine.run(prompt)
+    await engine.run(prompt)
 
-    # Harness short-circuits — no second round-trip to the model.
-    assert len(client.calls) == 1
-    assert "invalid JSON arguments" in result.answer
-    assert result.turns == 1
-    assert engine._metrics.stop_reason == "invalid_tool_args"
+    tool_messages = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
+    assert sorted(m["tool_call_id"] for m in tool_messages) == ["call_0", "call_1"]
 
 
 async def test_tool_raises(session, register_boom_tool):

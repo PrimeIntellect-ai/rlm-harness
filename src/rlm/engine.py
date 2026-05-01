@@ -322,24 +322,29 @@ class RLMEngine:
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
-                self._metrics.stop_reason = "multiple_tool_calls"
-                final_text = (
-                    "[emitted multiple tool calls in one turn; at most 1 is allowed]"
-                )
-                break
+                feedback = "Error: only one tool call per turn allowed"
+                for tc in msg.tool_calls:
+                    self.session.log_tool_result(turn, tc.function.name, feedback, 0.0)
+                    messages.append(
+                        {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                    )
+                last_appended_role = "tool"
+                continue
 
-            # Malformed tool-call arguments: fail the rollout so training
-            # penalises the mistake. Final_text + stop_reason make the failure
-            # visible to the verifiers harness without raising an exception.
             if msg.tool_calls and parsed_args[0] is None:
-                tool_name = msg.tool_calls[0].function.name
+                tc = msg.tool_calls[0]
+                tool_name = tc.function.name
                 err_info = tool_calls_log[0]["args"]
-                self._metrics.stop_reason = "invalid_tool_args"
-                final_text = (
-                    f"[invalid JSON arguments for tool '{tool_name}': "
-                    f"{err_info['_parse_error']}]"
+                feedback = (
+                    f"Error: invalid JSON arguments for tool '{tool_name}': "
+                    f"{err_info['_parse_error']}"
                 )
-                break
+                self.session.log_tool_result(turn, tool_name, feedback, 0.0)
+                messages.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                )
+                last_appended_role = "tool"
+                continue
 
             # Token budget check
             if (
@@ -356,9 +361,6 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            # Execute the single allowed tool call (reuse parsed args from above;
-            # parse failures have already broken the loop, so parsed_args[0] is
-            # guaranteed to be a dict here).
             tc = msg.tool_calls[0]
             tool_name = tc.function.name
             tool_args = parsed_args[0]
