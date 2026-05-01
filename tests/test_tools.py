@@ -56,9 +56,7 @@ async def test_multiple_tool_calls(session, register_add_tool):
 
     await engine.run(prompt)
 
-    tool_messages = [
-        m for m in client.calls[1]["messages"] if m.get("role") == "tool"
-    ]
+    tool_messages = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
     assert sorted(m["tool_call_id"] for m in tool_messages) == ["call_0", "call_1"]
 
 
