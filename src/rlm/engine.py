@@ -172,9 +172,7 @@ class RLMEngine:
         )
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-        self.allow_invalid_tool_calls = (
-            os.environ.get("RLM_ALLOW_INVALID_TOOL_CALLS") == "1"
-        )
+        self.strict_tool_calls = os.environ.get("RLM_STRICT_TOOL_CALLS") == "1"
 
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
@@ -325,11 +323,20 @@ class RLMEngine:
             self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
-                self._metrics.stop_reason = "multiple_tool_calls"
-                final_text = (
-                    "[emitted multiple tool calls in one turn; at most 1 is allowed]"
-                )
-                break
+                if self.strict_tool_calls:
+                    self._metrics.stop_reason = "multiple_tool_calls"
+                    final_text = (
+                        "[emitted multiple tool calls in one turn; at most 1 is allowed]"
+                    )
+                    break
+                feedback = "Error: only one tool call per turn allowed"
+                for tc in msg.tool_calls:
+                    self.session.log_tool_result(turn, tc.function.name, feedback, 0.0)
+                    messages.append(
+                        {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                    )
+                last_appended_role = "tool"
+                continue
 
             if msg.tool_calls and parsed_args[0] is None:
                 tc = msg.tool_calls[0]
@@ -339,7 +346,7 @@ class RLMEngine:
                     f"invalid JSON arguments for tool '{tool_name}': "
                     f"{err_info['_parse_error']}"
                 )
-                if not self.allow_invalid_tool_calls:
+                if self.strict_tool_calls:
                     self._metrics.stop_reason = "invalid_tool_args"
                     final_text = f"[{error_content}]"
                     break
@@ -375,7 +382,7 @@ class RLMEngine:
             t0 = time.time()
             tool = get_builtin_tool(tool_name)
             if tool is None:
-                if not self.allow_invalid_tool_calls:
+                if self.strict_tool_calls:
                     self._metrics.stop_reason = "unknown_tool"
                     final_text = f"[unknown tool '{tool_name}']"
                     break
