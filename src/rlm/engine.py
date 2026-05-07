@@ -403,7 +403,7 @@ class RLMEngine:
                 and usage.prompt_tokens >= self.summarize_at_tokens
             ):
                 try:
-                    await self._compact_branch(messages, turn)
+                    await self._compact_branch(messages, turn, active_tools)
                 except BadRequestError as e:
                     if not _is_request_too_large(e):
                         raise
@@ -434,7 +434,9 @@ class RLMEngine:
         )
         return result
 
-    async def _compact_branch(self, messages: list[dict], turn: int) -> None:
+    async def _compact_branch(
+        self, messages: list[dict], turn: int, active_tools: list[dict]
+    ) -> None:
         """Ask the model for a handoff summary and rebuild ``messages``.
 
         Called in-place: mutates ``messages`` to ``[system, user(framing +
@@ -442,6 +444,16 @@ class RLMEngine:
         summary doesn't count toward ``max_turns`` — it's housekeeping,
         not a work turn — but its tokens land in ``_total_usage`` for
         cost accounting.
+
+        ``active_tools`` is forwarded as ``tools=`` with
+        ``tool_choice="none"`` so the rendered system prompt matches
+        regular turns (vLLM's chat-completions layer injects the tools
+        block into the system message only when ``tools=`` is set). With
+        a matching system prompt, prime-rl's RL trajectory walker keeps
+        the extension property across the compaction boundary instead
+        of opening an extra training-sample split. ``tool_choice="none"``
+        keeps the original "text-only summary" behaviour by forbidding
+        tool calls on this turn.
         """
         # Measure what's about to be dropped BEFORE appending the
         # checkpoint prompt — otherwise the prompt's own chars get
@@ -450,17 +462,22 @@ class RLMEngine:
         dropped_chars = _count_messages_chars(messages[2:])
         turns_since_last = turn + 1 - self._branch_start_turn
 
-        # Append the checkpoint prompt and ask the model for a summary
-        # turn with NO tools available so it can only respond with text.
+        # Append the checkpoint prompt and ask the model for a text-only
+        # summary turn. Tools are advertised to the server (so the system
+        # prompt renders identically to regular turns) but
+        # ``tool_choice="none"`` forbids the model from calling any.
         # Warn about the REPL restart only when a kernel is actually running.
         checkpoint_prompt = CHECKPOINT_COMPACTION_PROMPT
         if self._repl is not None:
             checkpoint_prompt += REPL_RESTART_NOTE
         messages.append({"role": "user", "content": checkpoint_prompt})
+        request_kwargs: dict = {"model": self.model, "messages": messages}
+        if active_tools:
+            request_kwargs["tools"] = active_tools
+            request_kwargs["tool_choice"] = "none"
         response = await call_with_retries(
             self.client.chat.completions.create,
-            model=self.model,
-            messages=messages,
+            **request_kwargs,
         )
         usage = extract_usage(response)
         self._total_usage.prompt_tokens += usage.prompt_tokens
