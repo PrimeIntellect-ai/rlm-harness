@@ -159,7 +159,7 @@ class IPythonREPL:
         installed_skills = get_installed_skills()
 
         setup_code = f"""\
-import os, sys, types, json, time
+import os, sys, types, json, time, functools, inspect
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
@@ -200,10 +200,17 @@ def _wrap_callable(mod, log_source):
     wrapped.__dict__.update(mod.__dict__)
     if log_source is not None:
         _original_run = wrapped.run
+        @functools.wraps(_original_run)
         async def _logged_run(*args, **kwargs):
             _log_programmatic_call(mod.__name__, log_source)
             return await _original_run(*args, **kwargs)
         wrapped.run = _logged_run
+    # Mirror run's signature and docstring onto the module so
+    # `inspect.signature(<skill>)` and `help(<skill>)` expose the real API
+    # surface instead of `_CallableModule.__call__`'s `(*args, **kwargs)`
+    # and the file-level module docstring.
+    wrapped.__signature__ = inspect.signature(wrapped.run)
+    wrapped.__doc__ = wrapped.run.__doc__
     sys.modules[mod.__name__] = wrapped
     return wrapped
 
