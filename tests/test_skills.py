@@ -214,3 +214,36 @@ async def test_valid_bash_skill_metrics(session):
 
     assert engine._metrics.programmatic_tool_calls_python == 0
     assert engine._metrics.programmatic_tool_calls_bash == 1
+
+
+async def test_skill_introspection(session):
+    """``inspect.signature`` and ``__doc__`` see through the logger wrapper.
+
+    Without ``functools.wraps`` + a ``__signature__`` override on the
+    callable module, ``inspect.signature(say)`` returns
+    ``_CallableModule.__call__``'s ``(*args, **kwargs)`` and
+    ``inspect.signature(say.run)`` returns the logger shim's
+    ``(*args, **kwargs)`` — both useless for the model that prompt.py
+    tells to introspect the skill API.
+    """
+    code = (
+        "import inspect\n"
+        "print('sig:', list(inspect.signature(say).parameters))\n"
+        "print('sig.run:', list(inspect.signature(say.run).parameters))\n"
+        "print('doc match:', say.__doc__ == say.run.__doc__)"
+    )
+    messages = [
+        DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": code})]),
+        DummyMessage(content="ok"),
+    ]
+
+    client = DummyClient(messages)
+    engine = RLMEngine(client=client, session=session)  # type: ignore
+
+    await engine.run("introspect say")
+
+    output = tool_result(client)
+    show_tool_result(output)
+    assert "sig: ['s']" in output
+    assert "sig.run: ['s']" in output
+    assert "doc match: True" in output
