@@ -23,6 +23,7 @@ def run_cli(func: Any, prog: str | None = None) -> None:
 
     Async returns are awaited; non-``None`` return values are printed.
     """
+    tyro._experimental_options["utf8_boxes"] = False
     result = tyro.cli(func, prog=prog or Path(sys.argv[0]).stem)
     if inspect.isawaitable(result):
         result = asyncio.run(result)

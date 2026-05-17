@@ -102,6 +102,10 @@ async def test_bash_skill_invalid_args(session):
     show_tool_result(output)
     assert "--s" in output
     assert "required" in output
+    assert "╭" not in output
+    assert "╰" not in output
+    assert "│" not in output
+    assert "─" not in output
     assert result.answer == "the call failed"
 
 
