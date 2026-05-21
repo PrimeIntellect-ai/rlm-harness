@@ -28,10 +28,9 @@ _RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 
 
 PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
-OPENAI_BASE_URL_DEFAULT = "https://api.openai.com/v1"
 
 
-def _resolve_provider() -> tuple[str, str, dict[str, str]]:
+def _resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
     """Pick the first provider whose key is set: ``(base_url, api_key, headers)``.
 
     Each provider is a self-contained pair so a key never reaches a base
@@ -40,11 +39,12 @@ def _resolve_provider() -> tuple[str, str, dict[str, str]]:
     1. **Explicit** — ``RLM_API_KEY`` + ``RLM_BASE_URL`` (defaults to PI).
     2. **PI Inference** — ``PRIME_API_KEY`` at PI's base, with
        ``PRIME_TEAM_ID`` forwarded as ``X-Prime-Team-ID``.
-    3. **OpenAI** — ``OPENAI_API_KEY`` at ``OPENAI_BASE_URL`` (defaults to
-       ``api.openai.com``); covers OpenAI direct and verifiers' rollout
-       tunnel both.
+    3. **OpenAI** — ``OPENAI_API_KEY`` set: delegate to AsyncOpenAI's
+       native env handling (``OPENAI_API_KEY`` + ``OPENAI_BASE_URL``).
+       Covers OpenAI direct and verifiers' rollout tunnel both.
 
-    Falls back to PI + ``"EMPTY"`` so the SDK constructor never errors.
+    Falls back to PI + ``"EMPTY"`` so the SDK can't silently inherit
+    ``OPENAI_API_KEY`` and ship it to the PI default base.
     """
     if api_key := os.environ.get("RLM_API_KEY"):
         return os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL), api_key, {}
@@ -53,12 +53,8 @@ def _resolve_provider() -> tuple[str, str, dict[str, str]]:
         if team_id := os.environ.get("PRIME_TEAM_ID"):
             headers["X-Prime-Team-ID"] = team_id
         return PI_INFERENCE_BASE_URL, api_key, headers
-    if api_key := os.environ.get("OPENAI_API_KEY"):
-        return (
-            os.environ.get("OPENAI_BASE_URL", OPENAI_BASE_URL_DEFAULT),
-            api_key,
-            {},
-        )
+    if os.environ.get("OPENAI_API_KEY"):
+        return None, None, {}
     return PI_INFERENCE_BASE_URL, "EMPTY", {}
 
 
