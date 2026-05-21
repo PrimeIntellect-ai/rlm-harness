@@ -46,7 +46,13 @@ def make_client() -> AsyncOpenAI:
     decide whether to record them in the rollout's trajectory.
     """
     base_url = os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL)
-    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
+    # Fall back to "EMPTY" (never None) so AsyncOpenAI does not silently
+    # use its OPENAI_API_KEY env fallback — that would leak the OpenAI key
+    # to whatever ``base_url`` points at (e.g. PI Inference) when the user
+    # didn't explicitly opt in.
+    api_key = (
+        os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY") or "EMPTY"
+    )
     headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
     if team_id := os.environ.get("PRIME_TEAM_ID"):
         headers["X-Prime-Team-ID"] = team_id
