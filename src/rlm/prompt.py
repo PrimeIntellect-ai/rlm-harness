@@ -8,6 +8,24 @@ if TYPE_CHECKING:
     from rlm.tools.base import BuiltinTool
 
 
+# Importable names of the base toolkit declared in pyproject.toml.
+# Surfaced in the system prompt so the agent knows what's available
+# without probing — keep in sync with the dependency list.
+BASE_TOOLKIT = (
+    "requests",
+    "httpx",
+    "yaml",
+    "tomli",
+    "dotenv",
+    "pandas",
+    "numpy",
+    "scipy",
+    "bs4",
+    "lxml",
+    "pydantic",
+)
+
+
 def build_system_prompt(
     cwd: str,
     skills_dir: str | None,
@@ -30,6 +48,7 @@ def build_system_prompt(
         "",
         f"Working directory: {cwd}",
         f"Conversation log: {messages_path}",
+        f"Pre-installed Python packages: {', '.join(BASE_TOOLKIT)}.",
     ]
 
     skill_lines: list[str] = []
