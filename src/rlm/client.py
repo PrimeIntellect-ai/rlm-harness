@@ -33,21 +33,25 @@ PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
 def make_client() -> AsyncOpenAI:
     """Create an AsyncOpenAI client from environment variables.
 
-    Defaults to PI Inference. Key chain: ``RLM_API_KEY`` → ``PRIME_API_KEY``.
-    ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID`` if set. To target
-    a different endpoint, set ``RLM_BASE_URL`` and ``RLM_API_KEY`` explicitly.
+    Base URL: ``RLM_BASE_URL`` → ``OPENAI_BASE_URL`` → PI Inference.
+    Key chain: ``RLM_API_KEY`` → ``PRIME_API_KEY``, plus ``OPENAI_API_KEY``
+    when ``OPENAI_BASE_URL`` is the resolved base (so verifiers' rollout
+    tunnel and OpenAI-direct setups work without re-specifying creds).
+    ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID`` if set.
 
     Tags every outbound request with ``X-RLM-Depth: <RLM_DEPTH>`` so an
     interceptor (e.g. verifiers' interception server) can distinguish
     parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
     decide whether to record them in the rollout's trajectory.
     """
-    base_url = os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL)
+    openai_base = os.environ.get("OPENAI_BASE_URL")
+    base_url = os.environ.get("RLM_BASE_URL") or openai_base or PI_INFERENCE_BASE_URL
+    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
+    if not api_key and openai_base:
+        api_key = os.environ.get("OPENAI_API_KEY")
     # "EMPTY" (never None) so AsyncOpenAI does not silently fall back to
     # OPENAI_API_KEY and ship it to whatever base_url points at.
-    api_key = (
-        os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY") or "EMPTY"
-    )
+    api_key = api_key or "EMPTY"
     headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
     if team_id := os.environ.get("PRIME_TEAM_ID"):
         headers["X-Prime-Team-ID"] = team_id
