@@ -45,14 +45,19 @@ def make_client() -> AsyncOpenAI:
     parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
     decide whether to record them in the rollout's trajectory.
     """
-    base_url = os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL)
-    # Fall back to "EMPTY" (never None) so AsyncOpenAI does not silently
-    # use its OPENAI_API_KEY env fallback — that would leak the OpenAI key
-    # to whatever ``base_url`` points at (e.g. PI Inference) when the user
-    # didn't explicitly opt in.
-    api_key = (
-        os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY") or "EMPTY"
-    )
+    explicit_base = os.environ.get("RLM_BASE_URL")
+    base_url = explicit_base or PI_INFERENCE_BASE_URL
+    # OPENAI_API_KEY / ANTHROPIC_API_KEY are only consulted when the user
+    # has explicitly overridden ``RLM_BASE_URL``. Otherwise we'd silently
+    # send those keys to PI Inference (the default base_url), which is a
+    # different service than the key was issued for. The "EMPTY" sentinel
+    # also prevents AsyncOpenAI's own hidden OPENAI_API_KEY env fallback.
+    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
+    if not api_key and explicit_base:
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get(
+            "ANTHROPIC_API_KEY"
+        )
+    api_key = api_key or "EMPTY"
     headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
     if team_id := os.environ.get("PRIME_TEAM_ID"):
         headers["X-Prime-Team-ID"] = team_id
