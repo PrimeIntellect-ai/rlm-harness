@@ -36,7 +36,9 @@ def resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
     Each provider is a self-contained pair so a key never reaches a base
     URL it wasn't issued for:
 
-    1. **Explicit** — ``RLM_API_KEY`` + ``RLM_BASE_URL`` (defaults to PI).
+    1. **Explicit** — ``RLM_API_KEY`` (pairs with ``RLM_BASE_URL`` if set,
+       otherwise SDK default = ``api.openai.com``). Set both for a
+       non-OpenAI custom endpoint.
     2. **PI Inference** — ``PRIME_API_KEY`` at PI's base, with
        ``PRIME_TEAM_ID`` forwarded as ``X-Prime-Team-ID``.
     3. **OpenAI** — ``OPENAI_API_KEY`` set: delegate to AsyncOpenAI's
@@ -47,7 +49,7 @@ def resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
     ``OPENAI_API_KEY`` and ship it to the PI default base.
     """
     if api_key := os.environ.get("RLM_API_KEY"):
-        return os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL), api_key, {}
+        return os.environ.get("RLM_BASE_URL"), api_key, {}
     if api_key := os.environ.get("PRIME_API_KEY"):
         headers: dict[str, str] = {}
         if team_id := os.environ.get("PRIME_TEAM_ID"):
