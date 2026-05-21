@@ -30,45 +30,31 @@ _RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
 
 
-def _resolve_credentials() -> tuple[str | None, str | None, dict[str, str]]:
-    """Resolve ``(api_key, base_url, extra_headers)`` from env.
-
-    Precedence: ``RLM_API_KEY`` → ``PRIME_API_KEY`` → ``OPENAI_API_KEY`` →
-    ``ANTHROPIC_API_KEY``. PI Inference is preferred over OpenAI direct so
-    the default namespaced model slug (``openai/gpt-5-mini``) works out of
-    the box for Prime Intellect users. When the resolved key is
-    ``PRIME_API_KEY``, ``base_url`` defaults to PI Inference and
-    ``X-Prime-Team-ID`` is set from ``PRIME_TEAM_ID`` if present (mirrors
-    verifiers' client setup). Explicit ``RLM_BASE_URL`` always wins.
-    """
-    explicit_base = os.environ.get("RLM_BASE_URL")
-    if api_key := os.environ.get("RLM_API_KEY"):
-        return api_key, explicit_base, {}
-    if api_key := os.environ.get("PRIME_API_KEY"):
-        headers: dict[str, str] = {}
-        if team_id := os.environ.get("PRIME_TEAM_ID"):
-            headers["X-Prime-Team-ID"] = team_id
-        return api_key, explicit_base or PI_INFERENCE_BASE_URL, headers
-    if api_key := os.environ.get("OPENAI_API_KEY"):
-        return api_key, explicit_base, {}
-    return os.environ.get("ANTHROPIC_API_KEY"), explicit_base, {}
-
-
 def make_client() -> AsyncOpenAI:
     """Create an AsyncOpenAI client from environment variables.
+
+    Defaults target PI Inference: ``base_url`` is ``api.pinference.ai`` and
+    the API key is taken from ``RLM_API_KEY`` (explicit override) then
+    ``PRIME_API_KEY``. ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID``
+    when present (mirrors verifiers' client setup). To target OpenAI,
+    Anthropic, or a local interception server, set ``RLM_BASE_URL`` and
+    ``RLM_API_KEY`` explicitly.
 
     Tags every outbound request with ``X-RLM-Depth: <RLM_DEPTH>`` so an
     interceptor (e.g. verifiers' interception server) can distinguish
     parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
     decide whether to record them in the rollout's trajectory.
     """
-    api_key, base_url, prime_headers = _resolve_credentials()
-    depth = os.environ.get("RLM_DEPTH", "0")
+    base_url = os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL)
+    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
+    headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
+    if team_id := os.environ.get("PRIME_TEAM_ID"):
+        headers["X-Prime-Team-ID"] = team_id
     return AsyncOpenAI(
         base_url=base_url,
         api_key=api_key,
         max_retries=int(os.environ.get("RLM_SDK_MAX_RETRIES", 5)),
-        default_headers={"X-RLM-Depth": depth, **prime_headers},
+        default_headers=headers,
     )
 
 
