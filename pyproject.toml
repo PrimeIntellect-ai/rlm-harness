@@ -24,7 +24,6 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "pydantic",
-    "dill",
 ]
 
 [project.scripts]

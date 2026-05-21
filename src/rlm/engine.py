@@ -510,13 +510,8 @@ class RLMEngine:
             }
         )
 
-        # Persist user-defined REPL state across the kernel restart so the
-        # post-compaction agent can keep using variables, imports, and data.
-        if self._repl is not None:
-            state_path = str(self.session.dir / "_repl_state.pkl")
-            self._repl.save_user_state(state_path)
-            self._repl.restart_kernel()
-            self._repl.restore_user_state(state_path)
+        # Keep the IPython kernel running across compaction — the
+        # post-compaction agent inherits the full REPL namespace.
 
         # Metrics: close the old branch.
         self._metrics.record(
