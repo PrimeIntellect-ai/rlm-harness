@@ -220,6 +220,8 @@ for _name in {installed_skills!r}:
 
 if {allow_recursion!r}:
     globals()['rlm'] = _wrap_callable(__import__('rlm'), None)
+
+_rlm_startup_keys = frozenset(globals().keys()) | {{'_rlm_startup_keys'}}
 """
         self._execute_silent(setup_code)
 
@@ -244,6 +246,38 @@ if {allow_recursion!r}:
                 and msg["content"].get("execution_state") == "idle"
             ):
                 return True
+
+    def save_user_state(self, path: str) -> None:
+        """Serialize user-defined variables to disk via dill."""
+        code = f"""\
+import dill as _dill
+_to_save = {{}}
+for _k, _v in list(globals().items()):
+    if _k not in _rlm_startup_keys:
+        try:
+            _dill.dumps(_v)
+            _to_save[_k] = _v
+        except Exception:
+            pass
+with open({path!r}, 'wb') as _f:
+    _dill.dump(_to_save, _f)
+del _to_save, _k, _v, _f, _dill
+"""
+        self._execute_silent(code)
+
+    def restore_user_state(self, path: str) -> None:
+        """Restore user-defined variables from a dill dump."""
+        code = f"""\
+import dill as _dill
+import os as _os
+if _os.path.exists({path!r}):
+    with open({path!r}, 'rb') as _f:
+        _restored = _dill.load(_f)
+    globals().update(_restored)
+    del _restored, _f
+del _dill, _os
+"""
+        self._execute_silent(code)
 
     def restart_kernel(self):
         """Restart the kernel and restore the initial REPL state."""
