@@ -26,11 +26,7 @@ IPYTHON_SCHEMA = {
         "name": "ipython",
         "description": (
             "Execute code in a persistent IPython session. Variables, imports, "
-            "and function definitions persist across calls. "
-            "Use !command for shell commands (e.g. !ls -la, !cat file.py, !pip install foo). "
-            "Use !python3 to run code with the project's own packages "
-            "(e.g. !python3 -m pytest, !python3 -c 'import numpy'). "
-            "Use %%bash for multi-line shell scripts."
+            "and function definitions persist across calls."
         ),
         "parameters": {
             "type": "object",
