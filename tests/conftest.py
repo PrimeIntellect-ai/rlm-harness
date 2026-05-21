@@ -164,7 +164,7 @@ def session(tmp_path):
 
 @pytest.fixture(scope="session", autouse=True)
 def register_fixture_tools():
-    """Session-wide: fixture tools join the builtin registry alongside ipython/summarize/bash/edit."""
+    """Session-wide: fixture tools join the builtin registry alongside ipython/summarize/bash."""
     mp = pytest.MonkeyPatch()
     mp.setitem(tool_registry._TOOLS_BY_NAME, "add", AddTool())
     mp.setitem(tool_registry._TOOLS_BY_NAME, "boom", BoomTool())

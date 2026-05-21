@@ -6,14 +6,12 @@ import os
 
 from rlm.tools.base import BuiltinTool
 from rlm.tools.bash import BashTool
-from rlm.tools.edit import EditTool
 from rlm.tools.ipython import IpythonTool
 
 
 _BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (
     IpythonTool(),
     BashTool(),
-    EditTool(),
 )
 _TOOLS_BY_NAME: dict[str, BuiltinTool] = {tool.name: tool for tool in _BUILTIN_TOOLS}
 

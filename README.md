@@ -4,12 +4,11 @@
 
 A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
-The model gets four built-in tools (opt in / out via `RLM_TOOLS`):
+The model gets three built-in tools (opt in / out via `RLM_TOOLS`):
 
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash` (on by default)
 - `summarize` for dropping old turns from context and optionally resetting REPL state (on by default)
 - `bash` for stateless shell command execution (off by default)
-- `edit` for single-occurrence string replacement in a file (off by default)
 
 Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
 
@@ -179,7 +178,7 @@ For running `rlm` against a specific skill set outside of a sandbox-orchestrated
 
 ## Kernel
 
-The IPython kernel always runs in rlm's own Python (`sys.executable`). `install.sh` puts `rlm` and all discovered skills into the same `uv tool install` environment, so `from rlm import run`, `import edit`, etc. work natively from inside an IPython cell.
+The IPython kernel always runs in rlm's own Python (`sys.executable`). `install.sh` puts `rlm` and all discovered skills into the same `uv tool install` environment, so `from rlm import run`, `import websearch`, etc. work natively from inside an IPython cell.
 
 To exercise packages from the target project's `.venv` (e.g. running its test suite), shell out from an IPython cell: `!./.venv/bin/python3 -m pytest`. The kernel itself stays isolated from whatever project venv the agent is working on — no cross-cell state involving sandbox packages.
 
