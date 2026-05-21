@@ -28,7 +28,7 @@ source .venv/bin/activate
 rlm "fix the auth bug in login.py"
 
 # Override model/limits
-RLM_MODEL=gpt-4o RLM_MAX_TURNS=50 rlm "refactor the parser"
+RLM_MODEL=openai/gpt-5-mini RLM_MAX_TURNS=50 rlm "refactor the parser"
 
 # Append extra instructions to the generated system prompt
 RLM_APPEND_TO_SYSTEM_PROMPT="Always run tests before finishing." rlm "solve the task"
@@ -54,9 +54,9 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RLM_MODEL` | `gpt-4o` | Model name |
-| `RLM_API_KEY` | — | API key for the OpenAI-compatible client |
-| `RLM_BASE_URL` | — | Optional API base URL |
+| `RLM_MODEL` | `openai/gpt-5-mini` | Model name (PI Inference slug; use bare slugs like `gpt-4o` against OpenAI direct) |
+| `RLM_API_KEY` | — | API key for the OpenAI-compatible client. Falls through to `OPENAI_API_KEY`, then `PRIME_API_KEY` (auto-targets PI Inference with `X-Prime-Team-ID` from `PRIME_TEAM_ID`), then `ANTHROPIC_API_KEY` |
+| `RLM_BASE_URL` | — | Optional API base URL. Defaults to PI Inference (`https://api.pinference.ai/api/v1`) when the resolved key is `PRIME_API_KEY` |
 | `RLM_MAX_TURNS` | `30` | Max tool-calling turns per agent |
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |

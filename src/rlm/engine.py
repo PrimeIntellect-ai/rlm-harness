@@ -146,7 +146,7 @@ class RLMEngine:
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
     ):
-        self.model = model or os.environ.get("RLM_MODEL", "gpt-4o")
+        self.model = model or os.environ.get("RLM_MODEL", "openai/gpt-5-mini")
         self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
         self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
