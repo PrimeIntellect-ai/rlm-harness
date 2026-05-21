@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from rlm.tools.base import BuiltinTool
-
 
 def build_system_prompt(
     cwd: str,
@@ -15,19 +10,16 @@ def build_system_prompt(
     messages_path: str,
     *,
     allow_recursion: bool,
-    active_tools: list[BuiltinTool],
 ) -> str:
     """Build the system prompt.
 
     Layout: role → environment (cwd, log path, skills) → capabilities
-    (recursion) → tool API. Keep it tight: the model also receives the
-    per-tool schemas, so redundant tool guidance here just inflates
-    every request.
+    (recursion). Keep it tight: the model also receives the per-tool
+    schemas, so redundant tool guidance here just inflates every request.
     """
     parts: list[str] = [
         "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating one step at a time.",
         "When you are done, stop calling tools and state your final answer.",
-        "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
         "",
         f"Working directory: {cwd}",
         f"Conversation log: {messages_path}",
@@ -45,10 +37,6 @@ def build_system_prompt(
             "Each skill is an async function by the same name. "
             "Inspect with `help(<skill>)` or `inspect.signature(<skill>.run)`."
         )
-        skill_lines.append(
-            "Each skill is also available as a shell command by the same name: `<skill> ...`. "
-            "Discover its CLI usage with `<skill> --help`."
-        )
     if skill_lines:
         parts.extend(["", *skill_lines])
 
@@ -60,8 +48,5 @@ def build_system_prompt(
                 "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
             ]
         )
-
-    if active_tools:
-        parts.extend(["", "Call at most one built-in tool per turn."])
 
     return "\n".join(parts)

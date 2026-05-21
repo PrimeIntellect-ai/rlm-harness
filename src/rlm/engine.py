@@ -15,7 +15,6 @@ from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
     SKILLS_DIR,
-    BuiltinTool,
     IPythonREPL,
     ToolContext,
     ToolOutcome,
@@ -242,7 +241,7 @@ class RLMEngine:
         active_builtin_tools = get_active_builtin_tools()
         active_tools = [tool.schema() for tool in active_builtin_tools]
         messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
+        system_prompt = self._load_system_prompt(messages_path)
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -525,9 +524,7 @@ class RLMEngine:
         self._branch_start_turn = turn + 1
         self._metrics.turns_since_last_compaction = 0
 
-    def _load_system_prompt(
-        self, messages_path: str, active_tools: list[BuiltinTool]
-    ) -> str:
+    def _load_system_prompt(self, messages_path: str) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
         system_prompt = build_system_prompt(
@@ -536,7 +533,6 @@ class RLMEngine:
             get_installed_skills(),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
-            active_tools=active_tools,
         )
         if self.append_to_system_prompt:
             system_prompt += "\n\n" + self.append_to_system_prompt
