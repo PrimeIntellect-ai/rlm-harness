@@ -510,9 +510,6 @@ class RLMEngine:
             }
         )
 
-        # Keep the IPython kernel running across compaction — the
-        # post-compaction agent inherits the full REPL namespace.
-
         # Metrics: close the old branch.
         self._metrics.record(
             CompactionApplied(
