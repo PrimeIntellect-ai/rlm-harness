@@ -33,31 +33,21 @@ PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
 def make_client() -> AsyncOpenAI:
     """Create an AsyncOpenAI client from environment variables.
 
-    Defaults target PI Inference: ``base_url`` is ``api.pinference.ai`` and
-    the API key is taken from ``RLM_API_KEY`` (explicit override) then
-    ``PRIME_API_KEY``. ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID``
-    when present (mirrors verifiers' client setup). To target OpenAI,
-    Anthropic, or a local interception server, set ``RLM_BASE_URL`` and
-    ``RLM_API_KEY`` explicitly.
+    Defaults to PI Inference. Key chain: ``RLM_API_KEY`` → ``PRIME_API_KEY``.
+    ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID`` if set. To target
+    a different endpoint, set ``RLM_BASE_URL`` and ``RLM_API_KEY`` explicitly.
 
     Tags every outbound request with ``X-RLM-Depth: <RLM_DEPTH>`` so an
     interceptor (e.g. verifiers' interception server) can distinguish
     parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
     decide whether to record them in the rollout's trajectory.
     """
-    explicit_base = os.environ.get("RLM_BASE_URL")
-    base_url = explicit_base or PI_INFERENCE_BASE_URL
-    # OPENAI_API_KEY / ANTHROPIC_API_KEY are only consulted when the user
-    # has explicitly overridden ``RLM_BASE_URL``. Otherwise we'd silently
-    # send those keys to PI Inference (the default base_url), which is a
-    # different service than the key was issued for. The "EMPTY" sentinel
-    # also prevents AsyncOpenAI's own hidden OPENAI_API_KEY env fallback.
-    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
-    if not api_key and explicit_base:
-        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get(
-            "ANTHROPIC_API_KEY"
-        )
-    api_key = api_key or "EMPTY"
+    base_url = os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL)
+    # "EMPTY" (never None) so AsyncOpenAI does not silently fall back to
+    # OPENAI_API_KEY and ship it to whatever base_url points at.
+    api_key = (
+        os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY") or "EMPTY"
+    )
     headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
     if team_id := os.environ.get("PRIME_TEAM_ID"):
         headers["X-Prime-Team-ID"] = team_id

@@ -55,7 +55,7 @@ All configuration is via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RLM_MODEL` | `openai/gpt-5-mini` | Model name (PI Inference slug). Override with `--model` or `RLM_MODEL` for OpenAI/Anthropic direct (e.g. `gpt-4o`, `claude-sonnet-4-5`) |
-| `RLM_API_KEY` | — | API key for the OpenAI-compatible client. Falls back to `PRIME_API_KEY`; if `RLM_BASE_URL` is explicitly set, also falls back to `OPENAI_API_KEY` then `ANTHROPIC_API_KEY` so picking an alternate endpoint is one env var instead of two |
+| `RLM_API_KEY` | — | API key for the OpenAI-compatible client. Falls back to `PRIME_API_KEY` only. Provider-specific env vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are intentionally not consulted — set `RLM_API_KEY` explicitly when targeting a non-PI endpoint |
 | `RLM_BASE_URL` | `https://api.pinference.ai/api/v1` | API base URL. Defaults to PI Inference; override for OpenAI direct (`https://api.openai.com/v1`), Anthropic, or a local interception server. `PRIME_TEAM_ID` is forwarded as `X-Prime-Team-ID` whenever it's set |
 | `RLM_MAX_TURNS` | `30` | Max tool-calling turns per agent |
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
