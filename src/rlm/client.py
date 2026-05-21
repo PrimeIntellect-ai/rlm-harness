@@ -28,33 +28,51 @@ _RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 
 
 PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
+OPENAI_BASE_URL_DEFAULT = "https://api.openai.com/v1"
+
+
+def _resolve_provider() -> tuple[str, str, dict[str, str]]:
+    """Pick the first provider whose key is set: ``(base_url, api_key, headers)``.
+
+    Each provider is a self-contained pair so a key never reaches a base
+    URL it wasn't issued for:
+
+    1. **Explicit** — ``RLM_API_KEY`` + ``RLM_BASE_URL`` (defaults to PI).
+    2. **PI Inference** — ``PRIME_API_KEY`` at PI's base, with
+       ``PRIME_TEAM_ID`` forwarded as ``X-Prime-Team-ID``.
+    3. **OpenAI** — ``OPENAI_API_KEY`` at ``OPENAI_BASE_URL`` (defaults to
+       ``api.openai.com``); covers OpenAI direct and verifiers' rollout
+       tunnel both.
+
+    Falls back to PI + ``"EMPTY"`` so the SDK constructor never errors.
+    """
+    if api_key := os.environ.get("RLM_API_KEY"):
+        return os.environ.get("RLM_BASE_URL", PI_INFERENCE_BASE_URL), api_key, {}
+    if api_key := os.environ.get("PRIME_API_KEY"):
+        headers: dict[str, str] = {}
+        if team_id := os.environ.get("PRIME_TEAM_ID"):
+            headers["X-Prime-Team-ID"] = team_id
+        return PI_INFERENCE_BASE_URL, api_key, headers
+    if api_key := os.environ.get("OPENAI_API_KEY"):
+        return (
+            os.environ.get("OPENAI_BASE_URL", OPENAI_BASE_URL_DEFAULT),
+            api_key,
+            {},
+        )
+    return PI_INFERENCE_BASE_URL, "EMPTY", {}
 
 
 def make_client() -> AsyncOpenAI:
     """Create an AsyncOpenAI client from environment variables.
 
-    Base URL: ``RLM_BASE_URL`` → ``OPENAI_BASE_URL`` → PI Inference.
-    Key chain: ``RLM_API_KEY`` → ``PRIME_API_KEY``, plus ``OPENAI_API_KEY``
-    when ``OPENAI_BASE_URL`` is the resolved base (so verifiers' rollout
-    tunnel and OpenAI-direct setups work without re-specifying creds).
-    ``PRIME_TEAM_ID`` is forwarded as ``X-Prime-Team-ID`` if set.
-
-    Tags every outbound request with ``X-RLM-Depth: <RLM_DEPTH>`` so an
-    interceptor (e.g. verifiers' interception server) can distinguish
-    parent-agent calls (depth 0) from sub-agent calls (depth >= 1) and
-    decide whether to record them in the rollout's trajectory.
+    See ``_resolve_provider`` for provider precedence. Tags every outbound
+    request with ``X-RLM-Depth: <RLM_DEPTH>`` so an interceptor (e.g.
+    verifiers' interception server) can distinguish parent-agent calls
+    (depth 0) from sub-agent calls (depth >= 1) and decide whether to
+    record them in the rollout's trajectory.
     """
-    openai_base = os.environ.get("OPENAI_BASE_URL")
-    base_url = os.environ.get("RLM_BASE_URL") or openai_base or PI_INFERENCE_BASE_URL
-    api_key = os.environ.get("RLM_API_KEY") or os.environ.get("PRIME_API_KEY")
-    if not api_key and openai_base:
-        api_key = os.environ.get("OPENAI_API_KEY")
-    # "EMPTY" (never None) so AsyncOpenAI does not silently fall back to
-    # OPENAI_API_KEY and ship it to whatever base_url points at.
-    api_key = api_key or "EMPTY"
-    headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0")}
-    if team_id := os.environ.get("PRIME_TEAM_ID"):
-        headers["X-Prime-Team-ID"] = team_id
+    base_url, api_key, extra_headers = _resolve_provider()
+    headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0"), **extra_headers}
     return AsyncOpenAI(
         base_url=base_url,
         api_key=api_key,
