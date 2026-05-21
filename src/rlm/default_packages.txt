@@ -1,0 +1,20 @@
+# Python packages pre-installed into the rlm tool venv by install.sh, so
+# the agent can `import` them from the IPython kernel without pip-installing
+# mid-rollout. Listed here (not just in install.sh) so the system prompt can
+# advertise them to the model.
+#
+# Format: one entry per line; either `pip-name` or `pip-name import-name`
+# when the import name differs from the pip-install name. Comments start
+# with `#`. Avoid shell metacharacters (e.g. `>=`) — install.sh word-splits
+# this into `uv tool install --with ...` args.
+requests
+httpx
+pyyaml yaml
+tomli
+python-dotenv dotenv
+pandas
+numpy
+scipy
+beautifulsoup4 bs4
+lxml
+pydantic

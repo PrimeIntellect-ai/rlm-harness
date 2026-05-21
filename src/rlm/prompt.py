@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rlm.packages import DEFAULT_PACKAGES
+
 if TYPE_CHECKING:
     from rlm.tools.base import BuiltinTool
 
@@ -50,6 +52,15 @@ def build_system_prompt(
         )
     if skill_lines:
         parts.extend(["", *skill_lines])
+
+    if DEFAULT_PACKAGES:
+        importable = ", ".join(f"`{pkg.imp}`" for pkg in DEFAULT_PACKAGES)
+        parts.extend(
+            [
+                "",
+                f"Pre-installed Python packages (importable in the IPython kernel): {importable}.",
+            ]
+        )
 
     if allow_recursion:
         parts.extend(

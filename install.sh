@@ -60,14 +60,20 @@ if [ -d /task/rlm-skills ]; then
     done
 fi
 
-# Forward caller-supplied `uv tool install` extras (e.g. "--with numpy
-# --with sympy") when set, so environments can inject extra pip deps into
-# the rlm tool venv without patching this script. Tokens are word-split by
-# the shell, so avoid shell metacharacters (e.g. `>=`) inside package specs.
-EXTRA_UV_ARGS=""
-if [ -n "${RLM_EXTRA_UV_ARGS:-}" ]; then
-    EXTRA_UV_ARGS="$RLM_EXTRA_UV_ARGS"
+# Build the default `--with` flags from src/rlm/default_packages.txt so the
+# agent can `import` common libs (requests, pandas, …) without pip-installing
+# mid-rollout. Callers override the full set via RLM_EXTRA_UV_ARGS (e.g.
+# "--with numpy --with sympy"). Word-splitting applies, so avoid shell
+# metacharacters (e.g. `>=`) inside package specs.
+DEFAULT_EXTRA_UV_ARGS=""
+PACKAGES_FILE="$RLM_CHECKOUT/src/rlm/default_packages.txt"
+if [ -f "$PACKAGES_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        pkg=$(printf '%s\n' "$line" | sed 's/#.*//' | awk '{print $1}')
+        [ -n "$pkg" ] && DEFAULT_EXTRA_UV_ARGS="$DEFAULT_EXTRA_UV_ARGS --with $pkg"
+    done < "$PACKAGES_FILE"
 fi
+EXTRA_UV_ARGS="${RLM_EXTRA_UV_ARGS:-$DEFAULT_EXTRA_UV_ARGS}"
 
 uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS $EXTRA_UV_ARGS
 
