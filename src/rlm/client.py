@@ -33,22 +33,24 @@ PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
 def _resolve_credentials() -> tuple[str | None, str | None, dict[str, str]]:
     """Resolve ``(api_key, base_url, extra_headers)`` from env.
 
-    Precedence: ``RLM_API_KEY`` → ``OPENAI_API_KEY`` → ``PRIME_API_KEY`` →
-    ``ANTHROPIC_API_KEY``. When the resolved key is ``PRIME_API_KEY``,
-    ``base_url`` defaults to PI Inference and ``X-Prime-Team-ID`` is set
-    from ``PRIME_TEAM_ID`` if present (mirrors verifiers' client setup).
-    Explicit ``RLM_BASE_URL`` always wins.
+    Precedence: ``RLM_API_KEY`` → ``PRIME_API_KEY`` → ``OPENAI_API_KEY`` →
+    ``ANTHROPIC_API_KEY``. PI Inference is preferred over OpenAI direct so
+    the default namespaced model slug (``openai/gpt-5-mini``) works out of
+    the box for Prime Intellect users. When the resolved key is
+    ``PRIME_API_KEY``, ``base_url`` defaults to PI Inference and
+    ``X-Prime-Team-ID`` is set from ``PRIME_TEAM_ID`` if present (mirrors
+    verifiers' client setup). Explicit ``RLM_BASE_URL`` always wins.
     """
     explicit_base = os.environ.get("RLM_BASE_URL")
     if api_key := os.environ.get("RLM_API_KEY"):
-        return api_key, explicit_base, {}
-    if api_key := os.environ.get("OPENAI_API_KEY"):
         return api_key, explicit_base, {}
     if api_key := os.environ.get("PRIME_API_KEY"):
         headers: dict[str, str] = {}
         if team_id := os.environ.get("PRIME_TEAM_ID"):
             headers["X-Prime-Team-ID"] = team_id
         return api_key, explicit_base or PI_INFERENCE_BASE_URL, headers
+    if api_key := os.environ.get("OPENAI_API_KEY"):
+        return api_key, explicit_base, {}
     return os.environ.get("ANTHROPIC_API_KEY"), explicit_base, {}
 
 
