@@ -30,7 +30,7 @@ _RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
 
 
-def _resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
+def resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
     """Pick the first provider whose key is set: ``(base_url, api_key, headers)``.
 
     Each provider is a self-contained pair so a key never reaches a base
@@ -61,13 +61,13 @@ def _resolve_provider() -> tuple[str | None, str | None, dict[str, str]]:
 def make_client() -> AsyncOpenAI:
     """Create an AsyncOpenAI client from environment variables.
 
-    See ``_resolve_provider`` for provider precedence. Tags every outbound
+    See ``resolve_provider`` for provider precedence. Tags every outbound
     request with ``X-RLM-Depth: <RLM_DEPTH>`` so an interceptor (e.g.
     verifiers' interception server) can distinguish parent-agent calls
     (depth 0) from sub-agent calls (depth >= 1) and decide whether to
     record them in the rollout's trajectory.
     """
-    base_url, api_key, extra_headers = _resolve_provider()
+    base_url, api_key, extra_headers = resolve_provider()
     headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0"), **extra_headers}
     return AsyncOpenAI(
         base_url=base_url,
