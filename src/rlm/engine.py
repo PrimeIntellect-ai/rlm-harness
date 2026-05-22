@@ -47,13 +47,10 @@ CHECKPOINT_COMPACTION_PROMPT = (
 # Appended to the checkpoint prompt when the IPython REPL is active.
 REPL_RESTART_NOTE = (
     "\n\n"
-    "Note: the IPython kernel will be restarted after this summary, but "
-    "user-defined variables, imports, and in-memory data will be "
-    "automatically preserved across the restart. You do NOT need to "
-    "re-import libraries or re-load data — just reference them by name. "
-    "Mention important variable names and what they contain so the next "
-    "LLM knows what's available. Variables that cannot be serialized "
-    "(e.g. open file handles, database connections) will be lost."
+    "Note: the IPython kernel stays running across this compaction. "
+    "All variables, imports, and in-memory data are preserved. "
+    "Mention important variable names and what they contain so the "
+    "next LLM knows what's available."
 )
 
 # Wrapper text that frames the summary as the sole user-facing context
