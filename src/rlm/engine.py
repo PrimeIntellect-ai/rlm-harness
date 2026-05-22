@@ -47,11 +47,10 @@ CHECKPOINT_COMPACTION_PROMPT = (
 # Appended to the checkpoint prompt when the IPython REPL is active.
 REPL_RESTART_NOTE = (
     "\n\n"
-    "Note: the IPython kernel will be restarted after this summary. "
-    "Python variables, imports, loaded data, and in-memory state will "
-    "be wiped. Files on disk and any external side effects you've "
-    "already produced are preserved — capture file paths and what's "
-    "in them so the next LLM can pick up without re-doing work."
+    "Note: the IPython kernel stays running across this compaction. "
+    "All variables, imports, and in-memory data are preserved. "
+    "Mention important variable names and what they contain so the "
+    "next LLM knows what's available."
 )
 
 # Wrapper text that frames the summary as the sole user-facing context
@@ -507,11 +506,6 @@ class RLMEngine:
                 },
             }
         )
-
-        # Reset the persistent ipython kernel: the new "next LLM" shouldn't
-        # inherit live Python state it can't see in its context.
-        if self._repl is not None:
-            self._repl.restart_kernel()
 
         # Metrics: close the old branch.
         self._metrics.record(
