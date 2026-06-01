@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rlm.tools.git_block import allow_git
+
 if TYPE_CHECKING:
     from rlm.tools.base import BuiltinTool
 
@@ -23,6 +25,16 @@ BASE_TOOLKIT = (
     "bs4",
     "lxml",
     "pydantic",
+)
+
+SHELL_TOOL_NAMES = frozenset({"bash", "ipython"})
+GIT_HISTORY_GUARD_PROMPT = (
+    "Do not cheat by using online solutions or hints specific to this task, or "
+    "by copying or inferring solutions from other branches, tags, remotes, "
+    "reflogs, or broad git history in the project. Broad-history `git log` "
+    "options such as `--all`, `-all`, `--branches`, `--remotes`, `--tags`, "
+    "`--glob`, `--alternate-refs`, `--reflog`, `--walk-reflogs`, or `-g` will "
+    "be refused."
 )
 
 
@@ -79,7 +91,16 @@ def build_system_prompt(
             ]
         )
 
+    if _should_include_git_history_guard(active_tools):
+        parts.extend(["", GIT_HISTORY_GUARD_PROMPT])
+
     if active_tools:
         parts.extend(["", "Call at most one built-in tool per turn."])
 
     return "\n".join(parts)
+
+
+def _should_include_git_history_guard(active_tools: list["BuiltinTool"]) -> bool:
+    if allow_git():
+        return False
+    return any(tool.name in SHELL_TOOL_NAMES for tool in active_tools)
