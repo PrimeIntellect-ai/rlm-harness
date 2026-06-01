@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import time
@@ -137,7 +138,6 @@ class RLMEngine:
     def __init__(
         self,
         model: str | None = None,
-        max_turns: int | None = None,
         summarize_at_tokens: int | None = None,
         system_prompt_path: str | None = None,
         append_to_system_prompt: str | None = None,
@@ -146,7 +146,6 @@ class RLMEngine:
         client: AsyncOpenAI | None = None,
     ):
         self.model = model or os.environ.get("RLM_MODEL", "openai/gpt-5-mini")
-        self.max_turns = max_turns or int(os.environ.get("RLM_MAX_TURNS", "30"))
         self.cwd = cwd or os.getcwd()
         self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
         max_output = int(os.environ.get("RLM_MAX_OUTPUT", "-1"))
@@ -256,7 +255,7 @@ class RLMEngine:
         # ``None`` on the very first turn and after compaction (fresh branch).
         last_appended_role: str | None = None
 
-        for turn in range(self.max_turns):
+        for turn in itertools.count():
             # Call LLM
             request_kwargs = {
                 "model": self.model,
@@ -412,9 +411,6 @@ class RLMEngine:
                 # Branch boundary: the next API call's prompt is a fresh
                 # [system, user(framing+summary)], not a continuation.
                 last_appended_role = None
-        else:
-            self._metrics.stop_reason = "max_turns"
-            final_text = msg.content or "[max turns reached]"
 
         result = RLMResult(
             answer=final_text,
@@ -440,9 +436,8 @@ class RLMEngine:
 
         Called in-place: mutates ``messages`` to ``[system, user(framing +
         summary)]`` and restarts the ipython kernel. The LLM call for the
-        summary doesn't count toward ``max_turns`` — it's housekeeping,
-        not a work turn — but its tokens land in ``_total_usage`` for
-        cost accounting.
+        summary is housekeeping, not a work turn, but its tokens land in
+        ``_total_usage`` for cost accounting.
 
         ``active_tools`` is forwarded as ``tools=`` with
         ``tool_choice="none"`` so the rendered system prompt matches
