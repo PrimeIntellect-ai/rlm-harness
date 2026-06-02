@@ -66,6 +66,7 @@ All configuration is via environment variables:
 | `RLM_APPEND_TO_SYSTEM_PROMPT` | — | Extra instructions appended to the generated system prompt |
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
 | `RLM_TOOLS` | `ipython,summarize` | Comma-separated subset of builtin tools to enable. Empty string = no tools. Unknown names raise. |
+| `RLM_ALLOW_GIT` | — | Set to `1` to disable the restricted git-history guard. When unset, shell-capable prompts tell agents not to use task-specific online hints or solutions from other git history, and broad-history `git log` options such as `--all` are refused. |
 | `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `RLM_SDK_MAX_RETRIES` | `5` | Per-request retry count passed to the OpenAI SDK (in addition to the call-site retry wrapper that rides out longer outages). |
 

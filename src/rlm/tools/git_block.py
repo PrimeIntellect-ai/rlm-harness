@@ -1,15 +1,15 @@
-"""Block ``git`` at the tool-call level.
+"""Restrict history-wide ``git log`` access at the tool-call level.
 
-Mirrors the predicate in mini_swe_agent_plus's ``execute_bash.py``:
+Ordinary git commands are allowed. The guard refuses ``git log`` invocations
+that ask for non-current-branch history, such as ``git log --all``. This keeps
+the agent's visibility close to current-branch history while preserving useful
+commands like ``git status`` and ``git diff``.
 
 - split a bash command on ``&&``, ``||``, ``;`` and ``|``
-- if the first whitespace-separated token of any segment is ``git``, refuse
+- if a segment invokes ``git log`` with a restricted history flag, refuse
 
-The ``RLM_ALLOW_GIT=1`` env var disables the check entirely.
-
-The same refusal string the existing sandbox shim emits is reused here so
-that agent-visible logs (and any rubrics keyed on it) stay consistent
-across the two block strategies.
+The ``RLM_ALLOW_GIT=1`` env var disables the check entirely for backwards
+compatibility with environments that already opted out of git restrictions.
 """
 
 from __future__ import annotations
@@ -17,15 +17,39 @@ from __future__ import annotations
 import ast
 import os
 import re
+import shlex
 
 REFUSAL_TEMPLATE = (
-    "Bash command '{cmd}' is not allowed. Please use a different command or tool."
+    "Git history option '{cmd}' is not allowed. Use current-branch history only."
 )
 
 # Reuse the mini_swe_agent_plus separators verbatim so behavior matches.
 _SEPARATORS = re.compile(r"&&|\|\||;|\|")
 
-_BLOCKED = ("git",)
+_RESTRICTED_LOG_OPTIONS = {
+    "--all",
+    "-all",
+    "--alternate-refs",
+    "--reflog",
+    "--walk-reflogs",
+    "-g",
+}
+_RESTRICTED_LOG_OPTION_PREFIXES = (
+    "--branches",
+    "--glob",
+    "--remotes",
+    "--tags",
+)
+
+_GIT_GLOBAL_OPTIONS_WITH_VALUE = {
+    "-C",
+    "-c",
+    "--config-env",
+    "--exec-path",
+    "--git-dir",
+    "--namespace",
+    "--work-tree",
+}
 
 
 def allow_git() -> bool:
@@ -33,24 +57,75 @@ def allow_git() -> bool:
 
 
 def find_blocked_command(command: str) -> str | None:
-    """Return the offending token if ``command`` invokes a blocked binary.
+    """Return the offending token if ``command`` asks for broad git history.
 
     Splits on ``&&``, ``||``, ``;``, ``|`` so chained calls like
-    ``cd /repo && git status`` are caught the same way the reference
-    implementation catches them. Returns ``None`` if nothing is blocked
-    or if ``RLM_ALLOW_GIT=1``.
+    ``cd /repo && git log --all`` are caught. Returns ``None`` if nothing is
+    blocked or if ``RLM_ALLOW_GIT=1``.
     """
     if allow_git():
         return None
     for segment in _SEPARATORS.split(command):
-        tokens = segment.strip().split()
-        if tokens and tokens[0] in _BLOCKED:
-            return tokens[0]
+        blocked = find_blocked_git_log_option(_split_segment(segment))
+        if blocked is not None:
+            return blocked
     return None
 
 
 def refusal(cmd: str) -> str:
     return REFUSAL_TEMPLATE.format(cmd=cmd)
+
+
+def _split_segment(segment: str) -> list[str]:
+    try:
+        return shlex.split(segment)
+    except ValueError:
+        return segment.strip().split()
+
+
+def _is_git_binary(token: str) -> bool:
+    return token == "git" or token.rsplit("/", 1)[-1] == "git"
+
+
+def _skip_git_global_options(argv: list[str], index: int) -> int:
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            return index + 1
+        if not token.startswith("-"):
+            return index
+
+        option = token.split("=", 1)[0]
+        if option in _GIT_GLOBAL_OPTIONS_WITH_VALUE and "=" not in token:
+            index += 2
+        else:
+            index += 1
+    return index
+
+
+def _is_restricted_log_option(token: str) -> bool:
+    if token in _RESTRICTED_LOG_OPTIONS:
+        return True
+    return any(
+        token == option or token.startswith(f"{option}=")
+        for option in _RESTRICTED_LOG_OPTION_PREFIXES
+    )
+
+
+def find_blocked_git_log_option(argv: list[str]) -> str | None:
+    if not argv or not _is_git_binary(argv[0]):
+        return None
+
+    subcommand_index = _skip_git_global_options(argv, 1)
+    if subcommand_index >= len(argv) or argv[subcommand_index] != "log":
+        return None
+
+    for token in argv[subcommand_index + 1 :]:
+        if token == "--":
+            return None
+        if _is_restricted_log_option(token):
+            return token
+    return None
 
 
 # IPython shell-escape lines: ``!cmd`` and ``!!cmd``. Leading whitespace
@@ -76,9 +151,9 @@ def find_blocked_in_ipython(code: str) -> str | None:
        line magics, ``%%bash`` / ``%%sh`` cell magic. Each extracted
        bash fragment goes through ``find_blocked_command``.
     2. Pure-Python AST scan via :func:`find_blocked_python` — catches
-       ``subprocess.run([\"git\", ...])`` / ``os.system(\"git ...\")``
-       and the obvious aliases. See that function for documented
-       bypasses (dynamic ``getattr``, multi-hop reassignment, etc.).
+       restricted literal subprocess / ``os.system`` git-log invocations
+       and the obvious aliases. See that function for documented bypasses
+       (dynamic ``getattr``, multi-hop reassignment, etc.).
     """
     if allow_git():
         return None
@@ -103,8 +178,8 @@ def find_blocked_in_ipython(code: str) -> str | None:
     return find_blocked_python(code)
 
 
-# Statically-resolved fully-qualified callees that shell out to ``git``
-# when invoked with a literal ``git ...`` first positional argument.
+# Statically-resolved fully-qualified callees that shell out when invoked
+# with a literal first positional argument.
 _BLOCKED_PY_CALLS = frozenset(
     {
         "subprocess.run",
@@ -118,28 +193,20 @@ _BLOCKED_PY_CALLS = frozenset(
 )
 
 
-def _first_arg_starts_with_git(node: ast.Call) -> bool:
-    """Return True iff ``node.args[0]`` is a literal that invokes ``git``.
-
-    String args go through ``find_blocked_command`` so the same separator
-    splitting (``&&``, ``||``, ``;``, ``|``) applies as for direct bash
-    invocations — ``os.system("cd /tmp && git log")`` is refused
-    symmetrically. List/tuple args are argv with no shell parsing, so
-    only the first element matters.
-    """
+def _blocked_option_from_python_call(node: ast.Call) -> str | None:
     if not node.args:
-        return False
+        return None
     arg = node.args[0]
     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-        return find_blocked_command(arg.value) is not None
+        return find_blocked_command(arg.value)
     if isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
-        first = arg.elts[0]
-        return (
-            isinstance(first, ast.Constant)
-            and isinstance(first.value, str)
-            and first.value in _BLOCKED
-        )
-    return False
+        argv: list[str] = []
+        for elt in arg.elts:
+            if not isinstance(elt, ast.Constant) or not isinstance(elt.value, str):
+                return None
+            argv.append(elt.value)
+        return find_blocked_git_log_option(argv)
+    return None
 
 
 class _GitCallFinder(ast.NodeVisitor):
@@ -161,7 +228,7 @@ class _GitCallFinder(ast.NodeVisitor):
         self.module_aliases: dict[str, str] = {"subprocess": "subprocess", "os": "os"}
         # Maps local name -> blocked callee fqn (e.g. "run" -> "subprocess.run").
         self.callable_aliases: dict[str, str] = {}
-        self.found = False
+        self.found: str | None = None
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -195,8 +262,10 @@ class _GitCallFinder(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         fqn = self._resolve_callee(node.func)
-        if fqn in _BLOCKED_PY_CALLS and _first_arg_starts_with_git(node):
-            self.found = True
+        if fqn in _BLOCKED_PY_CALLS:
+            blocked = _blocked_option_from_python_call(node)
+            if blocked is not None:
+                self.found = blocked
         self.generic_visit(node)
 
     def _resolve_callee(self, expr: ast.AST) -> str | None:
@@ -240,9 +309,9 @@ def _strip_ipython_only(code: str) -> str:
 
 
 def find_blocked_python(code: str) -> str | None:
-    """Detect pure-Python git invocations in an ipython cell via AST walk.
+    """Detect restricted pure-Python git invocations via AST walk.
 
-    Returns the offending token (``\"git\"``) if a blocked call is found,
+    Returns the offending token (``\"--all\"`` etc.) if a blocked call is found,
     else ``None``. Honors ``RLM_ALLOW_GIT=1``. Ipython-only syntax
     (``!cmd``, ``%magic``, ``obj?``) is stripped before parsing so
     cells mixing ipython and Python still get scanned. Returns ``None``
@@ -256,4 +325,4 @@ def find_blocked_python(code: str) -> str | None:
         return None
     finder = _GitCallFinder()
     finder.visit(tree)
-    return _BLOCKED[0] if finder.found else None
+    return finder.found
