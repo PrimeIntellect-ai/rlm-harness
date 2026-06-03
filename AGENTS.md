@@ -25,4 +25,5 @@
 ## GitHub
 
 - **Draft PRs**: always create PRs as drafts (`gh pr create --draft`) to avoid triggering CI unnecessarily.
+- **PR titles**: start the title with a conventional-commit prefix matching the branch prefix (`feat:`, `fix:`, `chore:`, `docs:`, `tests:`), e.g. a `docs/...` branch gets a `docs: ...` title.
 - **Pull requests**: do not include a "test plan" section unless you actually ran tests or the user explicitly asked for one.
