@@ -4,14 +4,15 @@
 
 A minimal CLI coding agent with a persistent IPython execution environment and optional recursive sub-agents.
 
-The model gets four built-in tools (opt in / out via `RLM_TOOLS`):
+The model gets three built-in tools (opt in / out via `RLM_TOOLS`):
 
 - `ipython` for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash` (on by default)
-- `summarize` for dropping old turns from context and optionally resetting REPL state (on by default)
 - `bash` for stateless shell command execution (off by default)
 - `edit` for single-occurrence string replacement in a file (off by default)
 
-Inside the IPython session, the `rlm` module is pre-imported. When recursion is allowed, the model can call `await rlm.run(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
+Context is reclaimed automatically: when a turn's prompt token count crosses `RLM_SUMMARIZE_AT_TOKENS`, the engine compacts the conversation into a summary and continues on a fresh branch. The IPython kernel keeps running across the compaction, so REPL state survives (see [Compaction](#compaction)).
+
+Inside the IPython session, a callable `rlm` is pre-injected into the namespace. When recursion is allowed, the model can call `await rlm(...)` to spawn sub-agents. Skills supplied by the host environment (see [Skills](#skills)) are importable directly by name, e.g. `import websearch`.
 
 ## Install
 
@@ -54,51 +55,50 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `RLM_MODEL` | `openai/gpt-5-mini` | Model name (PI Inference slug). Override with `--model` or `RLM_MODEL` for OpenAI/Anthropic direct (e.g. `gpt-4o`, `claude-sonnet-4-5`) |
 | `RLM_API_KEY` / `RLM_BASE_URL` | — / SDK default (`https://api.openai.com/v1`) | Explicit override (highest priority). Independent: setting `RLM_API_KEY` alone targets the SDK default endpoint; set `RLM_BASE_URL` too for a custom endpoint. For PI, use `PRIME_API_KEY` (below) which owns the full pair. |
 | `PRIME_API_KEY` | — | PI Inference pair: targets `https://api.pinference.ai/api/v1` and forwards `PRIME_TEAM_ID` as `X-Prime-Team-ID` when set. |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | resolved by SDK | OpenAI pair — when `OPENAI_API_KEY` is set, AsyncOpenAI's native env handling is used (covers OpenAI direct and verifiers' rollout tunnel both). Provider precedence: explicit → PI → OpenAI. Keys are scoped to their own base URL so an `OPENAI_API_KEY` lying around can't leak to PI Inference. |
+| `RLM_TOOLS` | `ipython` | Comma-separated subset of builtin tools (`ipython`, `bash`, `edit`) to enable. Empty string = no tools. Unknown names raise. |
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
-| `RLM_MAX_TURNS_IN_CONTEXT` | `-1` | Max assistant turns retained in the live context (`-1` disables; `0` and `1` are invalid) |
+| `RLM_SUMMARIZE_AT_TOKENS` | — | Auto-compaction threshold: when a turn's prompt tokens reach this value, the conversation is compacted into a summary. Unset disables auto-compaction. |
 | `RLM_MAX_TOKENS` | `0` | Optional completion-token budget (`0` disables) |
 | `RLM_APPEND_TO_SYSTEM_PROMPT` | — | Extra instructions appended to the generated system prompt |
 | `RLM_SYSTEM_PROMPT_PATH` | — | Path to a file whose contents fully replace the generated system prompt |
-| `RLM_TOOLS` | `ipython,summarize` | Comma-separated subset of builtin tools to enable. Empty string = no tools. Unknown names raise. |
 | `RLM_ALLOW_GIT` | — | Set to `1` to disable the restricted git-history guard. When unset, shell-capable prompts tell agents not to use task-specific online hints or solutions from other git history, and broad-history `git log` options such as `--all` are refused. |
-| `RLM_HOME` | `.rlm` | Root directory for sessions and data |
 | `RLM_SDK_MAX_RETRIES` | `5` | Per-request retry count passed to the OpenAI SDK (in addition to the call-site retry wrapper that rides out longer outages). |
 
 `RLM_SYSTEM_PROMPT_PATH` takes precedence over `RLM_APPEND_TO_SYSTEM_PROMPT`. CLI flags override env vars: `rlm --model gpt-5-mini --append-to-system-prompt "..." --system-prompt-path /tmp/system.txt "prompt"`.
 
 ## Recursion
 
-Each agent runs inside a persistent IPython kernel. The `rlm` module is pre-imported there, so recursive calls look like normal Python:
+Each agent runs inside a persistent IPython kernel with an already-running event loop. A callable `rlm` is pre-injected into the kernel namespace, so recursive calls are just `await`:
 
 ```python
-import asyncio
-import rlm
-
-result = asyncio.run(rlm.run("verify the fix"))
+result = await rlm("verify the fix")
 ```
 
-For parallel sub-agents, use normal async Python:
+The result is an `RLMResult` with `.answer`, `.usage`, `.turns`, and `.session_dir`. For parallel sub-agents, use normal async Python:
 
 ```python
 import asyncio
-import rlm
 
-async def main():
-    return await asyncio.gather(
-        rlm.run("check auth.py"),
-        rlm.run("check login.py"),
-    )
-
-results = asyncio.run(main())
+results = await asyncio.gather(
+    rlm("check auth.py"),
+    rlm("check login.py"),
+)
 ```
 
 When recursion is disabled by depth, the system prompt does not advertise these APIs and child runs beyond the depth limit fail immediately.
+
+## Compaction
+
+There is no model-driven compaction tool. Compaction is automatic: set `RLM_SUMMARIZE_AT_TOKENS` and, once a turn's prompt token count reaches that threshold, the engine asks the model for a handoff summary and resumes the task on a fresh branch seeded with that summary. The original task prompt is dropped — the summary carries the goal forward.
+
+The IPython kernel keeps running across the compaction, so all variables, imports, and in-memory data are preserved; the model is told to mention important variable names in its summary so the resumed branch knows what's available. With `RLM_SUMMARIZE_AT_TOKENS` unset, no auto-compaction occurs.
 
 ## Session Directory
 
