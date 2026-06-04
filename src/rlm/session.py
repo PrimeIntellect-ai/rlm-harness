@@ -15,7 +15,7 @@ class Session:
     def __init__(self, session_dir: Path | None = None):
         if session_dir is None:
             sid = uuid.uuid4().hex[:12]
-            rlm_home = Path(os.environ.get("RLM_HOME", ".rlm"))
+            rlm_home = Path(os.environ.get("RLM_HOME") or Path.home() / ".rlm")
             session_dir = rlm_home / "sessions" / sid
         # Absolute path so later writes (meta.json.tmp, messages.jsonl) keep
         # working if something changes cwd mid-rollout (a tool's os.chdir,
