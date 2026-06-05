@@ -80,7 +80,6 @@ def build_system_prompt(
         "When you are done, stop calling tools and state your final answer.",
         "",
         f"Working directory: {cwd}",
-        f"Conversation log: {messages_path}",
     ]
 
     skill_lines: list[str] = []
