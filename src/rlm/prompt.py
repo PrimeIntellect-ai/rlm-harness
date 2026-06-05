@@ -55,8 +55,10 @@ def build_system_prompt(
     every request.
     """
     parts: list[str] = [
-        "You are a coding agent. You solve tasks by writing and executing code, observing results, and iterating one step at a time.",
+        "You are a general purpose agent that uses code to solve tasks.",
+        "You solve tasks by breaking down problems into sub-tasks, writing and executing code, observing results, and iterating one step at a time.",
         "When you are done, stop calling tools and state your final answer.",
+        "A Python project's interpreter can be in `PATH`. If not use the appropriate `.venv`.",
         "",
         f"Working directory: {cwd}",
         f"Conversation log: {messages_path}",
