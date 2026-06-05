@@ -39,24 +39,14 @@ GIT_HISTORY_GUARD_PROMPT = (
 IPYTHON_CONTROL_PROMPT = (
     "IPython is the agent's long-lived notebook: a persistent control "
     "environment for reasoning, context management, state, tool orchestration, "
-    "and recursive subcalls. Use it to peek at information, partition large "
-    "context, transform outputs, keep intermediate variables, write small "
-    "helper functions, and preserve useful state across turns or compaction.\n\n"
+    "and recursive subcalls. Use it to keep intermediate variables, inspect "
+    "and transform outputs, write small helper functions, and preserve useful "
+    "state across turns or compaction.\n\n"
     "Do not assume IPython is the native runtime of the external thing being "
     "investigated. A repository, package, service, dataset, paper, website, "
     "benchmark, or API may have its own environment and normal interface. "
     "Evaluate external systems through their own interface, then use IPython "
-    "to coordinate the process and analyze what comes back.\n\n"
-    "Treat tool outputs as data. When useful, bind results to variables and "
-    "inspect them with Python: indexing, slicing, filtering, regexes, parsing, "
-    "sorting, aggregation, or small purpose-built helpers. Prefer carrying "
-    "forward compact structured state over repeatedly re-reading or "
-    "re-printing large raw outputs.\n\n"
-    "Use subagents for separable work. Give them narrow prompts, ask them to "
-    "return evidence and conclusions, and then synthesize their results in the "
-    "main notebook. Use async patterns for parallel independent checks when "
-    "that reduces latency or context pressure. The main agent remains "
-    "responsible for deciding what matters and what to do next."
+    "to coordinate the process and analyze what comes back."
 )
 
 
