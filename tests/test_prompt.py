@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rlm.prompt import GIT_HISTORY_GUARD_PROMPT, build_system_prompt
+from rlm.prompt import GIT_HISTORY_GUARD_PROMPT, IPYTHON_CONTROL_PROMPT, build_system_prompt
 
 
 @dataclass
@@ -44,3 +44,15 @@ def test_git_history_guard_prompt_omitted_without_shell_tools(monkeypatch):
     monkeypatch.delenv("RLM_ALLOW_GIT", raising=False)
 
     assert GIT_HISTORY_GUARD_PROMPT not in _prompt([_Tool("summarize")])
+
+
+def test_ipython_control_prompt_included_for_ipython_tool():
+    prompt = _prompt([_Tool("ipython")])
+
+    assert IPYTHON_CONTROL_PROMPT in prompt
+    assert "long-lived notebook" in prompt
+    assert "Treat tool outputs as data" in prompt
+
+
+def test_ipython_control_prompt_omitted_without_ipython_tool():
+    assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
