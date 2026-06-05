@@ -28,6 +28,17 @@ BASE_TOOLKIT = (
 )
 
 SHELL_TOOL_NAMES = frozenset({"bash", "ipython"})
+
+IPYTHON_USAGE_PROMPT = (
+    "The `ipython` tool runs each call as one IPython cell. `!cmd` shells out a "
+    "single line — for multi-line shell, use the `%%bash` cell magic on its own "
+    "first line and put the script underneath. Your shell runs inside this tool's "
+    "uv-managed environment, which is NOT the project's venv. Importing the "
+    "project under test directly (e.g. `import <project>`) won't work unless you "
+    "prepend the source path to `sys.path`, run the code under the project's "
+    "interpreter (e.g. `!/usr/local/bin/python3 ...` or `%%bash` calling it), or "
+    "install the project into this environment with `uv pip install -e <path>`."
+)
 GIT_HISTORY_GUARD_PROMPT = (
     "Do not cheat by using online solutions or hints specific to this task, or "
     "by copying or inferring solutions from other branches, tags, remotes, "
@@ -91,6 +102,9 @@ def build_system_prompt(
                 "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
             ]
         )
+
+    if any(tool.name == "ipython" for tool in active_tools):
+        parts.extend(["", IPYTHON_USAGE_PROMPT])
 
     if _should_include_git_history_guard(active_tools):
         parts.extend(["", GIT_HISTORY_GUARD_PROMPT])
