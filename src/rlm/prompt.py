@@ -32,20 +32,17 @@ SHELL_TOOL_NAMES = frozenset({"bash", "ipython"})
 
 def _ipython_usage_prompt() -> str:
     return (
-        "- Treat `ipython` as your scratchpad: hold Python state, jot intermediate "
-        "results, keep notes between turns, manage context. Each call is one IPython "
-        "cell.\n"
-        "- Cells default to Python. To run a shell command, prefix with `!` "
-        "(single line) or `%%bash` (multi-line, must be the cell's first line). "
-        "Prefer `%%bash`; use `!` only for one-liners.\n"
-        "- Antipatterns (each raises `SyntaxError` — the cell is parsed as Python):\n"
-        "    BAD:  find /app -name '*.py'    GOOD: !find /app -name '*.py'\n"
-        "    BAD:  grep -rn 'foo' /app       GOOD: !grep -rn 'foo' /app\n"
-        "    BAD:  cat > /tmp/x.py <<EOF     GOOD: a `%%bash` cell with the heredoc inside\n"
-        "  Also: don't wrap a shell command in `subprocess.run([...])` when `!cmd` "
-        "or `%%bash` does the same thing in fewer tokens.\n"
-        f"- The kernel has these Python imports available by default: "
-        f"{', '.join(BASE_TOOLKIT)}."
+        "`ipython` is your primary working surface — a persistent IPython kernel. "
+        "Use it as a scratchpad: hold Python state across turns, compute and inspect "
+        "intermediate results, and keep working notes that manage your own context. "
+        "Every call runs as one cell in that kernel and the namespace persists, so "
+        "build up variables and helper functions as you go rather than re-deriving "
+        "them. "
+        "A cell is Python by default. Drop to the shell only when you actually need it: "
+        "prefix a single command with `!`, or open a cell with `%%bash` for anything "
+        "multi-line. A bare shell command with no prefix is read as Python and will "
+        "fail. "
+        f"The kernel comes with {', '.join(BASE_TOOLKIT)} already importable."
     )
 
 
