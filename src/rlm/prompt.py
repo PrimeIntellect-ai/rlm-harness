@@ -46,7 +46,14 @@ IPYTHON_CONTROL_PROMPT = (
     "investigated. A repository, package, service, dataset, paper, website, "
     "benchmark, or API may have its own environment and normal interface. "
     "Evaluate external systems through their own interface, then use IPython "
-    "to coordinate the process and analyze what comes back."
+    "to coordinate the process and analyze what comes back.\n\n"
+    "Important: do not install dependencies into the IPython kernel just to "
+    "make an external project import or run there. If a project import, test, "
+    "script, CLI, or dependency check is needed, run it through that project's "
+    "own environment and normal command interface. For example, in a Python "
+    "repo use its documented commands, `uv run ...`, `.venv/bin/python ...`, "
+    "or the active project interpreter from the repo root. Treat failures from "
+    "that native environment as the relevant result."
 )
 
 

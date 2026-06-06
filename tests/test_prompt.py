@@ -52,6 +52,7 @@ def test_ipython_control_prompt_included_for_ipython_tool():
     assert IPYTHON_CONTROL_PROMPT in prompt
     assert "long-lived notebook" in prompt
     assert "native runtime" in prompt
+    assert "do not install dependencies into the IPython kernel" in prompt
 
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
