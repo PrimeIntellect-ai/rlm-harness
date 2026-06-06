@@ -28,24 +28,6 @@ BASE_TOOLKIT = (
 )
 
 SHELL_TOOL_NAMES = frozenset({"bash", "ipython"})
-
-
-def _ipython_usage_prompt() -> str:
-    return (
-        "`ipython` is your primary working surface — a persistent IPython kernel. "
-        "Use it as a scratchpad: hold Python state across turns, compute and inspect "
-        "intermediate results, and keep working notes that manage your own context. "
-        "Every call runs as one cell in that kernel and the namespace persists, so "
-        "build up variables and helper functions as you go rather than re-deriving "
-        "them. "
-        "A cell is Python by default. Drop to the shell only when you actually need it: "
-        "prefix a single command with `!`, or open a cell with `%%bash` for anything "
-        "multi-line. A bare shell command with no prefix is read as Python and will "
-        "fail. "
-        f"The kernel comes with {', '.join(BASE_TOOLKIT)} already importable."
-    )
-
-
 GIT_HISTORY_GUARD_PROMPT = (
     "Do not cheat by using online solutions or hints specific to this task, or "
     "by copying or inferring solutions from other branches, tags, remotes, "
@@ -53,6 +35,28 @@ GIT_HISTORY_GUARD_PROMPT = (
     "options such as `--all`, `-all`, `--branches`, `--remotes`, `--tags`, "
     "`--glob`, `--alternate-refs`, `--reflog`, `--walk-reflogs`, or `-g` will "
     "be refused."
+)
+IPYTHON_CONTROL_PROMPT = (
+    "IPython is the agent's long-lived notebook: a persistent control "
+    "environment for reasoning, context management, state, tool orchestration, "
+    "and recursive subcalls. Use it to keep intermediate variables, inspect "
+    "and transform outputs, write small helper functions, and preserve useful "
+    "state across turns or compaction.\n\n"
+    "Do not assume IPython is the native runtime of the external thing being "
+    "investigated. A repository, package, service, dataset, paper, website, "
+    "benchmark, or API may have its own environment and normal interface. "
+    "Evaluate external systems through their own interface, then use IPython "
+    "to coordinate the process and analyze what comes back.\n\n"
+    "When running shell commands from IPython, use `%%bash` cells. Avoid "
+    "`!cmd` shell escapes for project commands so shell behavior is explicit "
+    "and multi-line commands share one shell context.\n\n"
+    "Important: do not install dependencies into the IPython kernel just to "
+    "make an external project import or run there. If a project import, test, "
+    "script, CLI, or dependency check is needed, run it through that project's "
+    "own environment and normal command interface. For example, in a Python "
+    "repo use its documented commands, `uv run ...`, `.venv/bin/python ...`, "
+    "or the active project interpreter from the repo root. Treat failures from "
+    "that native environment as the relevant result."
 )
 
 
@@ -78,6 +82,8 @@ def build_system_prompt(
         "When you are done, stop calling tools and state your final answer.",
         "",
         f"Working directory: {cwd}",
+        f"Conversation log: {messages_path}",
+        f"Pre-installed Python packages: {', '.join(BASE_TOOLKIT)}.",
     ]
 
     skill_lines: list[str] = []
@@ -108,8 +114,8 @@ def build_system_prompt(
             ]
         )
 
-    if any(tool.name == "ipython" for tool in active_tools):
-        parts.extend(["", _ipython_usage_prompt()])
+    if _has_tool(active_tools, "ipython"):
+        parts.extend(["", IPYTHON_CONTROL_PROMPT])
 
     if _should_include_git_history_guard(active_tools):
         parts.extend(["", GIT_HISTORY_GUARD_PROMPT])
@@ -124,3 +130,7 @@ def _should_include_git_history_guard(active_tools: list["BuiltinTool"]) -> bool
     if allow_git():
         return False
     return any(tool.name in SHELL_TOOL_NAMES for tool in active_tools)
+
+
+def _has_tool(active_tools: list["BuiltinTool"], name: str) -> bool:
+    return any(tool.name == name for tool in active_tools)
