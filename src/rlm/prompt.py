@@ -36,6 +36,28 @@ GIT_HISTORY_GUARD_PROMPT = (
     "`--glob`, `--alternate-refs`, `--reflog`, `--walk-reflogs`, or `-g` will "
     "be refused."
 )
+IPYTHON_CONTROL_PROMPT = (
+    "IPython is the agent's long-lived notebook: a persistent control "
+    "environment for reasoning, context management, state, tool orchestration, "
+    "and recursive subcalls. Use it to keep intermediate variables, inspect "
+    "and transform outputs, write small helper functions, and preserve useful "
+    "state across turns or compaction.\n\n"
+    "Do not assume IPython is the native runtime of the external thing being "
+    "investigated. A repository, package, service, dataset, paper, website, "
+    "benchmark, or API may have its own environment and normal interface. "
+    "Evaluate external systems through their own interface, then use IPython "
+    "to coordinate the process and analyze what comes back.\n\n"
+    "When running shell commands from IPython, use `%%bash` cells. Avoid "
+    "`!cmd` shell escapes for project commands so shell behavior is explicit "
+    "and multi-line commands share one shell context.\n\n"
+    "Important: do not install dependencies into the IPython kernel just to "
+    "make an external project import or run there. If a project import, test, "
+    "script, CLI, or dependency check is needed, run it through that project's "
+    "own environment and normal command interface. For example, in a Python "
+    "repo use its documented commands, `uv run ...`, `.venv/bin/python ...`, "
+    "or the active project interpreter from the repo root. Treat failures from "
+    "that native environment as the relevant result."
+)
 
 
 def build_system_prompt(
@@ -93,6 +115,9 @@ def build_system_prompt(
             ]
         )
 
+    if _has_tool(active_tools, "ipython"):
+        parts.extend(["", IPYTHON_CONTROL_PROMPT])
+
     if _should_include_git_history_guard(active_tools):
         parts.extend(["", GIT_HISTORY_GUARD_PROMPT])
 
@@ -106,3 +131,7 @@ def _should_include_git_history_guard(active_tools: list["BuiltinTool"]) -> bool
     if allow_git():
         return False
     return any(tool.name in SHELL_TOOL_NAMES for tool in active_tools)
+
+
+def _has_tool(active_tools: list["BuiltinTool"], name: str) -> bool:
+    return any(tool.name == name for tool in active_tools)
