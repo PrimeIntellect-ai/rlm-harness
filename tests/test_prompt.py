@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from rlm.prompt import GIT_HISTORY_GUARD_PROMPT, IPYTHON_CONTROL_PROMPT, build_system_prompt
+from rlm.prompt import (
+    GIT_HISTORY_GUARD_PROMPT,
+    IPYTHON_CONTROL_PROMPT,
+    build_system_prompt,
+)
 
 
 @dataclass
