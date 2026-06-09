@@ -1,8 +1,81 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-# Ensure curl is available (Multi-SWE-RL images may lack it)
-command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq curl; }
+has_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+install_system_packages() {
+    if has_command apt-get; then
+        apt-get -o Acquire::Retries=3 update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y -qq --no-install-recommends "$@"
+    elif has_command apk; then
+        apk add --no-cache "$@"
+    elif has_command dnf; then
+        dnf install -y "$@"
+        dnf clean all
+    elif has_command yum; then
+        yum install -y "$@"
+        yum clean all
+    elif has_command microdnf; then
+        microdnf install -y "$@"
+        microdnf clean all
+    elif has_command zypper; then
+        zypper --non-interactive refresh
+        zypper --non-interactive install --no-recommends "$@"
+        zypper clean --all
+    else
+        echo "No supported package manager found to install: $*" >&2
+        return 127
+    fi
+    hash -r
+}
+
+ensure_command() {
+    local name="$1"
+    shift
+    if has_command "$name"; then
+        return 0
+    fi
+    install_system_packages "$@"
+    has_command "$name"
+}
+
+install_uv() {
+    local installer="/tmp/rlm-uv-install.sh"
+    if ! curl -LsSf https://astral.sh/uv/install.sh -o "$installer"; then
+        install_system_packages ca-certificates
+        curl -LsSf https://astral.sh/uv/install.sh -o "$installer"
+    fi
+    sh "$installer"
+    rm -f "$installer"
+}
+
+python_supports_rlm() {
+    "$1" - <<'PY'
+import sys
+
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+}
+
+select_tool_python() {
+    if [ -n "${RLM_TOOL_PYTHON:-}" ]; then
+        echo "$RLM_TOOL_PYTHON"
+        return
+    fi
+    if has_command python3 && python_supports_rlm "$(command -v python3)"; then
+        command -v python3
+        return
+    fi
+    if has_command python && python_supports_rlm "$(command -v python)"; then
+        command -v python
+        return
+    fi
+    echo "3.10"
+}
+
+ensure_command curl ca-certificates curl
 
 # Always install latest uv (sandbox images may have stale versions). Pin
 # UV_INSTALL_DIR (uv installer target) and UV_TOOL_BIN_DIR (`uv tool install`
@@ -14,17 +87,15 @@ command -v curl >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -q
 # and any `uv tool install`-ed executables (e.g. `rlm`) off PATH.
 export UV_INSTALL_DIR="${UV_INSTALL_DIR:-$HOME/.local/bin}"
 export UV_TOOL_BIN_DIR="${UV_TOOL_BIN_DIR:-$UV_INSTALL_DIR}"
-curl -LsSf https://astral.sh/uv/install.sh | sh
+install_uv
 export PATH="$UV_INSTALL_DIR:$PATH"
-
-# Install ripgrep if missing
-command -v rg >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq ripgrep; }
 
 # Clone the repo
 RLM_REPO_URL="${RLM_REPO_URL:-github.com/PrimeIntellect-ai/rlm.git}"
 RLM_REPO_BRANCH="${RLM_REPO_BRANCH:-main}"
 RLM_CHECKOUT="${RLM_CHECKOUT_PATH:-/tmp/rlm-checkout}"
 if [ ! -f "$RLM_CHECKOUT/install.sh" ] || [ ! -f "$RLM_CHECKOUT/pyproject.toml" ]; then
+    ensure_command git git
     case "$RLM_REPO_URL" in
         https://*|http://*)
             CLONE_URL="$RLM_REPO_URL"
@@ -38,6 +109,12 @@ if [ ! -f "$RLM_CHECKOUT/install.sh" ] || [ ! -f "$RLM_CHECKOUT/pyproject.toml" 
     esac
     rm -rf "$RLM_CHECKOUT"
     git clone --depth 1 --branch "$RLM_REPO_BRANCH" "$CLONE_URL" "$RLM_CHECKOUT"
+fi
+
+if ! has_command rg; then
+    if ! install_system_packages ripgrep || ! has_command rg; then
+        echo "Warning: ripgrep is not available; continuing without rg" >&2
+    fi
 fi
 
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
@@ -69,7 +146,7 @@ if [ -n "${RLM_EXTRA_UV_ARGS:-}" ]; then
     EXTRA_UV_ARGS="$RLM_EXTRA_UV_ARGS"
 fi
 
-uv tool install --python 3.10 --editable "$RLM_CHECKOUT" $SKILL_ARGS $EXTRA_UV_ARGS
+uv tool install --python "$(select_tool_python)" --editable "$RLM_CHECKOUT" $SKILL_ARGS $EXTRA_UV_ARGS
 
 REAL_TOOL_DIR="$UV_TOOL_BIN_DIR/.rlm-real-tools"
 mkdir -p "$REAL_TOOL_DIR"
