@@ -8,6 +8,7 @@ from rlm.prompt import (
     GIT_HISTORY_GUARD_PROMPT,
     IPYTHON_CONTROL_PROMPT,
     build_system_prompt,
+    resolve_prompt_input,
 )
 
 
@@ -16,7 +17,7 @@ class _Tool:
     name: str
 
 
-def _prompt(active_tools: list[_Tool]) -> str:
+def _prompt(active_tools: list[_Tool], **kwargs) -> str:
     return build_system_prompt(
         "/repo",
         None,
@@ -24,6 +25,7 @@ def _prompt(active_tools: list[_Tool]) -> str:
         "/repo/.rlm/messages.jsonl",
         allow_recursion=False,
         active_tools=active_tools,
+        **kwargs,
     )
 
 
@@ -62,3 +64,43 @@ def test_ipython_control_prompt_included_for_ipython_tool():
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
     assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
+
+
+def test_append_system_prompt_literal():
+    prompt = _prompt([_Tool("ipython")], append_system_prompt="Always run tests.")
+    assert "Always run tests." in prompt
+
+
+def test_append_system_prompt_from_file(tmp_path):
+    extra = tmp_path / "extra.md"
+    extra.write_text("Never use global variables.")
+    prompt = _prompt([_Tool("ipython")], append_system_prompt=str(extra))
+    assert "Never use global variables." in prompt
+
+
+def test_append_system_prompt_nonexistent_path_used_as_literal():
+    # A path that doesn't exist should be treated as literal text
+    prompt = _prompt(
+        [_Tool("ipython")],
+        append_system_prompt="/no/such/path/and/certainly/not/a/file.md",
+    )
+    assert "/no/such/path/and/certainly/not/a/file.md" in prompt
+
+
+def test_append_system_prompt_omitted_when_none():
+    prompt = _prompt([_Tool("ipython")])
+    assert prompt.endswith("Call at most one built-in tool per turn.")
+
+
+def test_resolve_prompt_input_returns_file_contents(tmp_path):
+    f = tmp_path / "prompt.txt"
+    f.write_text("hello from file")
+    assert resolve_prompt_input(str(f)) == "hello from file"
+
+
+def test_resolve_prompt_input_returns_literal_for_nonexistent():
+    assert resolve_prompt_input("not a file") == "not a file"
+
+
+def test_resolve_prompt_input_empty_string():
+    assert resolve_prompt_input("") == ""

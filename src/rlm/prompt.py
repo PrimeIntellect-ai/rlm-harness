@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from rlm.tools.git_block import allow_git
@@ -60,6 +61,17 @@ IPYTHON_CONTROL_PROMPT = (
 )
 
 
+def resolve_prompt_input(value: str) -> str:
+    """Resolve a prompt input value.
+
+    If *value* is a path to an existing file, return its contents.
+    Otherwise return the literal string.
+    """
+    if value and Path(value).is_file():
+        return Path(value).read_text()
+    return value
+
+
 def build_system_prompt(
     cwd: str,
     skills_dir: str | None,
@@ -68,6 +80,7 @@ def build_system_prompt(
     *,
     allow_recursion: bool,
     active_tools: list[BuiltinTool],
+    append_system_prompt: str | None = None,
 ) -> str:
     """Build the system prompt.
 
@@ -123,6 +136,9 @@ def build_system_prompt(
 
     if active_tools:
         parts.extend(["", "Call at most one built-in tool per turn."])
+
+    if append_system_prompt:
+        parts.extend(["", resolve_prompt_input(append_system_prompt)])
 
     return "\n".join(parts)
 

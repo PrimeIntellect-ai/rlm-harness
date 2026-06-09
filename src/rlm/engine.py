@@ -519,17 +519,15 @@ class RLMEngine:
     ) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
-        system_prompt = build_system_prompt(
+        return build_system_prompt(
             self.cwd,
             str(SKILLS_DIR) if SKILLS_DIR is not None else None,
             get_installed_skills(),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             active_tools=active_tools,
+            append_system_prompt=self.append_to_system_prompt,
         )
-        if self.append_to_system_prompt:
-            system_prompt += "\n\n" + self.append_to_system_prompt
-        return system_prompt
 
     def _detect_new_children(self):
         """Scan session dir for new sub-* directories and log them."""
