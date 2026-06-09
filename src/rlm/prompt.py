@@ -59,6 +59,14 @@ IPYTHON_CONTROL_PROMPT = (
     "or the active project interpreter from the repo root. Treat failures from "
     "that native environment as the relevant result."
 )
+EDIT_TOOL_PROMPT = (
+    "Use the `edit` tool to modify files. Do not edit files by writing code "
+    "that reads, transforms, and writes them — call `edit` directly with the "
+    "old and new strings. This is faster, less error-prone, and produces a "
+    "clean diff. Only use IPython or bash for file edits when the change "
+    "cannot be expressed as a single string replacement (e.g. reformatting, "
+    "renaming across many files)."
+)
 
 
 def resolve_prompt_input(value: str) -> str:
@@ -130,6 +138,9 @@ def build_system_prompt(
 
     if _has_tool(active_tools, "ipython"):
         parts.extend(["", IPYTHON_CONTROL_PROMPT])
+
+    if _has_tool(active_tools, "edit"):
+        parts.extend(["", EDIT_TOOL_PROMPT])
 
     if _should_include_git_history_guard(active_tools):
         parts.extend(["", GIT_HISTORY_GUARD_PROMPT])

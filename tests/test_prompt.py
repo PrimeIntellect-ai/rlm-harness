@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rlm.prompt import (
+    EDIT_TOOL_PROMPT,
     GIT_HISTORY_GUARD_PROMPT,
     IPYTHON_CONTROL_PROMPT,
     build_system_prompt,
@@ -64,6 +65,19 @@ def test_ipython_control_prompt_included_for_ipython_tool():
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
     assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
+
+
+def test_edit_tool_prompt_included_for_edit_tool():
+    prompt = _prompt([_Tool("edit")])
+
+    assert EDIT_TOOL_PROMPT in prompt
+    assert "Use the `edit` tool to modify files" in prompt
+    assert "Do not edit files by writing code" in prompt
+    assert "call `edit` directly" in prompt
+
+
+def test_edit_tool_prompt_omitted_without_edit_tool():
+    assert EDIT_TOOL_PROMPT not in _prompt([_Tool("ipython")])
 
 
 def test_append_system_prompt_literal():
