@@ -1,5 +1,6 @@
 """Tests for the cross-process live-agent cap (rlm._agent_limit)."""
 
+import asyncio
 import subprocess
 import sys
 
@@ -53,5 +54,36 @@ def test_sweep_reclaims_dead_pid_markers(monkeypatch, tmp_path):
     g3, m3 = lim.acquire_slot()
     assert not g3  # now genuinely at capacity
 
+    lim.release_slot(m1)
+    lim.release_slot(m2)
+
+
+async def test_acquire_blocking_waits_for_a_free_slot(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path))
+
+    g1, m1 = lim.acquire_slot()
+    assert g1  # the only slot is taken
+
+    waiter = asyncio.ensure_future(lim.acquire_slot_blocking())
+    await asyncio.sleep(0.4)
+    assert not waiter.done()  # still blocked while full
+
+    lim.release_slot(m1)
+    m2 = await asyncio.wait_for(waiter, timeout=3)
+    assert m2 is not None  # resolved once a slot freed
+    lim.release_slot(m2)
+
+
+async def test_acquire_blocking_times_out_and_proceeds_over_cap(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_AGENT_WAIT_TIMEOUT", "0.5")
+
+    g1, m1 = lim.acquire_slot()
+    assert g1  # full
+
+    m2 = await asyncio.wait_for(lim.acquire_slot_blocking(), timeout=3)
+    assert m2 is not None  # forced over-cap after the wait timeout
     lim.release_slot(m1)
     lim.release_slot(m2)

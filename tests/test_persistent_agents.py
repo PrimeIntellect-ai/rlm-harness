@@ -100,3 +100,27 @@ async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
     assert (await h2.wait()).answer == "b1"
     h2.dismiss()
     await asyncio.sleep(0.05)
+
+
+async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
+    from rlm import _agent_limit as lim
+    from rlm import api
+
+    granted, held = lim.acquire_slot()  # occupy the only slot
+    assert granted
+
+    started = asyncio.ensure_future(
+        api.run("hi", client=DummyClient([DummyMessage(content="done")]))
+    )
+    await asyncio.sleep(0.4)
+    assert not started.done()  # the one-off blocks until a slot frees
+
+    lim.release_slot(held)
+    result = await asyncio.wait_for(started, timeout=3)
+    assert result.answer == "done"

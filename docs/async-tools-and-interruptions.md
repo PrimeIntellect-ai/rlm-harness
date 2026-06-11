@@ -252,7 +252,12 @@ one level deeper), mirroring the per-kernel registries:
   processes (an integer counter could not). At cap, `send` **raises**
   `AgentLimitReached` — a creation-time failure, uniform across tools (any tool's
   `send` raises it) and distinct from the `poll().error` runtime channel; this
-  supersedes the earlier "terminal handle" sketch. Env: `RLM_MAX_LIVE_AGENTS`.
+  supersedes the earlier "terminal handle" sketch. The one-off path
+  (`await rlm(...)`, `gather(...)`) is capped too but **blocks** until a slot
+  frees (the model awaits it anyway); a safety timeout `RLM_AGENT_WAIT_TIMEOUT`
+  (default 300s, `0` = forever) proceeds over-cap rather than deadlock when
+  slot-holders are themselves waiting for slots. The root rollout (depth 0) is
+  not capped. Env: `RLM_MAX_LIVE_AGENTS`.
 
 ### 3.8 Open questions (Phase 1)
 

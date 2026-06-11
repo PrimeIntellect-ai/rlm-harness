@@ -5,7 +5,12 @@ from __future__ import annotations
 import asyncio
 import os
 
-from rlm._agent_limit import AgentLimitReached, acquire_slot, release_slot
+from rlm._agent_limit import (
+    AgentLimitReached,
+    acquire_slot,
+    acquire_slot_blocking,
+    release_slot,
+)
 from rlm._async_runtime import Handle, Registry, close_all_registries
 from rlm.engine import RLMEngine
 from rlm.session import Session
@@ -22,13 +27,23 @@ def _child_session(name: str | None = None) -> Session | None:
 
 
 async def run(prompt: str, **kwargs) -> RLMResult:
-    """Run a single rlm agent to completion (blocking)."""
+    """Run a single rlm agent to completion (blocking).
+
+    A sub-agent (depth > 0) counts against the live-agent cap and **waits** for a
+    free slot (unlike ``send``, which raises). The root rollout is not capped.
+    """
     if "session" not in kwargs:
         child = _child_session()
         if child:
             kwargs["session"] = child
-    engine = RLMEngine(**kwargs)
-    return await engine.run(prompt)
+    marker = None
+    if int(os.environ.get("RLM_DEPTH", "0")) > 0:
+        marker = await acquire_slot_blocking()
+    try:
+        engine = RLMEngine(**kwargs)
+        return await engine.run(prompt)
+    finally:
+        release_slot(marker)
 
 
 # --- Background, named, persistent sub-agents ------------------------------
