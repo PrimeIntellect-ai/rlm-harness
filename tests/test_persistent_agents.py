@@ -62,6 +62,32 @@ async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):
     await asyncio.sleep(0.05)
 
 
+async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    from rlm import api
+
+    client = DummyClient(
+        [DummyMessage(content="answer one"), DummyMessage(content="answer two")]
+    )
+    # "foo/bar" and "foo-bar" both sanitize to sub-foo-bar; they must address
+    # one worker + one transcript, not two engines writing the same dir.
+    h1 = api.send("first", name="foo/bar", client=client)
+    assert (await h1.wait()).answer == "answer one"
+
+    h2 = api.send("second", name="foo-bar")  # same sanitized key → continues h1
+    assert (await h2.wait()).answer == "answer two"  # reuses h1's engine + client
+
+    assert h1.name == h2.name == "foo-bar"
+    assert h1.session_dir == h2.session_dir
+    assert h2.session_dir.name == "sub-foo-bar"
+
+    h2.dismiss()
+    await asyncio.sleep(0.05)
+
+
 def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
     from rlm.engine import RLMEngine
 

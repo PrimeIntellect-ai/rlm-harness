@@ -13,7 +13,7 @@ from rlm._agent_limit import (
 )
 from rlm._async_runtime import Handle, Registry, close_all_registries
 from rlm.engine import RLMEngine
-from rlm.session import Session
+from rlm.session import Session, _sanitize_name
 from rlm.types import RLMResult
 
 
@@ -93,16 +93,24 @@ def send(
 ) -> Handle:
     """Start or continue a named, persistent background sub-agent.
 
-    Returns a handle immediately; poll it with ``handle.poll()`` (or
-    ``rlm.get(name)`` from another cell). Re-sending the same ``name`` appends a
-    turn to the same agent (multi-turn). ``name=None`` draws a deterministic
-    auto-name. ``engine_kwargs`` (e.g. ``model=...``) are forwarded to the
-    sub-agent's ``RLMEngine`` and apply only when the agent is first created.
+    Returns a handle immediately; keep it in a variable and ``handle.poll()`` it
+    from a later cell. Re-sending the same ``name`` appends a turn to the same
+    agent (multi-turn). ``name`` is canonicalized to a filesystem-safe form, so
+    names differing only in unsafe characters (``foo/bar`` and ``foo-bar``)
+    refer to the same agent. ``name=None`` draws a deterministic auto-name.
+    ``engine_kwargs`` (e.g. ``model=...``) are forwarded to the sub-agent's
+    ``RLMEngine`` and apply only when the agent is first created.
 
     ``max_tokens`` caps the sub-agent's completion-token budget. It is clamped
     to the ``RLM_SUB_MAX_TOKENS`` ceiling (the user-set maximum), which is also
     the default when ``max_tokens`` is omitted.
     """
+    # Canonicalize so the registry key matches the session-dir suffix
+    # (child_dir sanitizes too): names that differ only in unsafe characters
+    # address one agent and one transcript, not two.
+    if name is not None:
+        name = _sanitize_name(name)
+
     ceiling = int(os.environ.get("RLM_SUB_MAX_TOKENS", "0")) or None
     if ceiling is not None:
         max_tokens = min(max_tokens, ceiling) if max_tokens is not None else ceiling
