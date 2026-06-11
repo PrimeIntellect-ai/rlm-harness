@@ -58,21 +58,24 @@ IPYTHON_CONTROL_PROMPT = (
     "or the active project interpreter from the repo root. Treat failures from "
     "that native environment as the relevant result."
     "\n\n"
-    "Use Python for reading, searching, and editing files — it gives you "
-    "reusable variables you can slice, filter, and act on without re-reading. "
-    "Always assign read/search results to named variables so you can revisit "
-    "them later."
+    "Use Python for reading and searching files — it gives you reusable "
+    "variables you can slice, filter, and act on without re-reading. Always "
+    "assign read/search results to named variables so you can revisit them "
+    "later."
 )
 EDIT_SKILL_PROMPT = (
-    "For file changes that are exact replacements, prefer the pre-imported "
-    "`edit` skill over manual file writes. Use exactly "
+    "For targeted modifications to existing files, you must use the "
+    "pre-imported `edit` skill instead of manual Python file writes. Use "
+    "exactly "
     "`await edit(path=\"relative/file.py\", old_str=\"\"\"old text\"\"\", "
     "new_str=\"\"\"new text\"\"\")`. The target `old_str` must appear exactly "
     "once. The supported keyword arguments are `path`, `old_str`, `new_str`, "
     "and optional `cwd`; do not use `file`, `old`, `new`, line numbers, "
-    "`after`, or `insert`. If the replacement is not unique or the change is "
-    "too broad for an exact string replacement, then use normal Python file "
-    "I/O."
+    "`after`, or `insert`. If an edit call fails because the string is not "
+    "found or not unique, inspect the file and retry with a smaller exact "
+    "snippet before falling back. Only use normal Python file I/O for creating "
+    "new files or for broad generated rewrites that cannot be expressed as "
+    "one or more exact replacements."
 )
 
 

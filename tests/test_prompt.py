@@ -63,6 +63,8 @@ def test_ipython_control_prompt_included_for_ipython_tool():
     assert "native runtime" in prompt
     assert "use `%%bash` cells" in prompt
     assert "do not install dependencies into the IPython kernel" in prompt
+    assert "Use Python for reading and searching files" in prompt
+    assert "Use Python for reading, searching, and editing files" not in prompt
 
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
@@ -74,8 +76,11 @@ def test_edit_skill_prompt_included_when_edit_is_installed():
 
     assert EDIT_SKILL_PROMPT in prompt
     assert 'await edit(path="relative/file.py"' in prompt
+    assert "you must use the pre-imported `edit` skill" in prompt
     assert "`old_str` must appear exactly once" in prompt
     assert "do not use `file`, `old`, `new`, line numbers" in prompt
+    assert "inspect the file and retry with a smaller exact snippet" in prompt
+    assert "Only use normal Python file I/O for creating new files" in prompt
 
 
 def test_edit_skill_prompt_omitted_without_edit_skill():
