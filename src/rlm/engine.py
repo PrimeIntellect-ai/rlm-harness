@@ -144,6 +144,7 @@ class RLMEngine:
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
+        max_tokens: int | None = None,
     ):
         self.model = model or os.environ.get("RLM_MODEL", "openai/gpt-5-mini")
         self.cwd = cwd or os.getcwd()
@@ -171,9 +172,11 @@ class RLMEngine:
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
-        # Token budget
-        _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
-        self.max_tokens = _max_tok if _max_tok > 0 else None
+        # Token budget: explicit kwarg wins, otherwise RLM_MAX_TOKENS.
+        if max_tokens is None:
+            _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
+            max_tokens = _max_tok if _max_tok > 0 else None
+        self.max_tokens = max_tokens
 
         self.client = client or make_client()
         self.session = session
@@ -194,6 +197,15 @@ class RLMEngine:
         # report "turns since last compaction" when a compaction fires.
         self._branch_start_turn: int = 0
 
+        # Resumable-run state (setup / advance / aclose). ``run`` is setup + one
+        # advance + aclose; named agents keep these alive across advances.
+        self._setup_done = False
+        self._depth_exceeded = False
+        self._active_tools: list[dict] = []
+        self._messages: list[dict] = []
+        self._turn_offset = 0
+        self._final_text = ""
+
     def _ensure_session(self):
         """Create session if not set."""
         if self.session is not None:
@@ -202,60 +214,88 @@ class RLMEngine:
         self.session = Session(session_dir)
 
     async def run(self, prompt: str) -> RLMResult:
-        """Run a single agent loop to completion."""
-        # Check depth limit
+        """Run a single agent loop to completion (setup + one advance + close)."""
+        self.setup()
+        try:
+            return await self.advance(prompt)
+        finally:
+            await self.aclose()
+
+    def setup(self) -> None:
+        """Prepare the engine for one or more advances.
+
+        Creates the session, starts the IPython kernel (when the ipython tool is
+        active), and seeds ``self._messages`` with the system prompt. Idempotent.
+        On depth-limit the engine is marked inert: no session/kernel is created,
+        ``advance`` returns the depth-limit result, and ``aclose`` is a no-op.
+        """
+        if self._setup_done or self._depth_exceeded:
+            return
         if self.depth > self.max_depth:
-            return RLMResult(
-                answer=f"[depth limit {self.max_depth} reached, cannot start]",
-                turns=0,
-            )
+            self._depth_exceeded = True
+            return
 
         self._ensure_session()
-
         self.session.write_meta(
             session_id=self.session.dir.name,
             model=self.model,
             depth=self.depth,
             status="running",
             start_time=time.time(),
-            prompt_preview=prompt[:200],
             cwd=self.cwd,
         )
 
-        # Start IPython kernel only when the ipython tool is active —
-        # otherwise the model can't see or dispatch it, so the kernel
-        # startup (subprocess + injection) is pure waste.
-        if any(tool.name == "ipython" for tool in get_active_builtin_tools()):
+        active_builtin_tools = get_active_builtin_tools()
+        self._active_tools = [tool.schema() for tool in active_builtin_tools]
+
+        # Start IPython kernel only when the ipython tool is active — otherwise
+        # the model can't see or dispatch it, so the startup is pure waste.
+        if any(tool.name == "ipython" for tool in active_builtin_tools):
             self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
             self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
-        try:
-            return await self._run_loop(prompt)
-        finally:
-            if self._repl is not None:
-                self._repl.shutdown()
-
-    async def _run_loop(self, prompt: str) -> RLMResult:
-        active_builtin_tools = get_active_builtin_tools()
-        active_tools = [tool.schema() for tool in active_builtin_tools]
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
+        self._messages = [{"role": "system", "content": system_prompt}]
+        self._turn_offset = 0
+        self._final_text = ""
+        self._setup_done = True
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
+    async def advance(self, prompt: str) -> RLMResult:
+        """Append a user turn and run the loop until the model stops calling tools.
+
+        Repeatable: each call continues the same conversation on the same live
+        kernel, so a named agent holds a multi-turn conversation across sends.
+        """
+        if not self._setup_done and not self._depth_exceeded:
+            self.setup()
+        if self._depth_exceeded:
+            return RLMResult(
+                answer=f"[depth limit {self.max_depth} reached, cannot start]",
+                turns=0,
+            )
+
+        if self._turn_offset == 0:
+            self.session.write_meta(prompt_preview=prompt[:200])
+
+        # Alias the instance list so the loop body (and _compact_branch's in-place
+        # messages[:] = ...) mutate the persisted conversation directly.
+        messages = self._messages
+        active_tools = self._active_tools
+        messages.append({"role": "user", "content": prompt})
 
         final_text = ""
-        turn = 0
         # Role of whatever the engine appended to ``messages`` since the
         # last API call. Drives RLMMetrics.note_assistant_turn's tool-token
         # attribution: only "tool" appendages count toward total_tool_response_tokens.
-        # ``None`` on the very first turn and after compaction (fresh branch).
+        # ``None`` on the first turn of an advance (growth is the user turn) and
+        # after compaction (fresh branch).
         last_appended_role: str | None = None
 
-        for turn in itertools.count():
+        turn = self._turn_offset
+        for local_turn in itertools.count():
+            turn = self._turn_offset + local_turn
             # Call LLM
             request_kwargs = {
                 "model": self.model,
@@ -412,22 +452,55 @@ class RLMEngine:
                 # [system, user(framing+summary)], not a continuation.
                 last_appended_role = None
 
-        result = RLMResult(
+        self._turn_offset = turn + 1
+        self._final_text = final_text
+        return RLMResult(
             answer=final_text,
             session_dir=self.session.dir,
             usage=self._total_usage,
             turns=turn + 1,
         )
-        self.session.finalize(
-            final_text,
-            usage={
-                "prompt_tokens": self._total_usage.prompt_tokens,
-                "completion_tokens": self._total_usage.completion_tokens,
-            },
-            turns=turn + 1,
-            metrics=self._metrics,
-        )
-        return result
+
+    async def aclose(self) -> None:
+        """Finalize the session and shut the kernel down.
+
+        Idempotent; a no-op if the engine never set up (e.g. depth-limited).
+        """
+        if not self._setup_done:
+            return
+        self._setup_done = False
+        try:
+            # Drain background sub-agents living in this engine's kernel so their
+            # sessions finalize (and grandchildren cascade-close) before we
+            # aggregate child metrics and shut the kernel down. Best-effort: a
+            # wedged child must not block the parent from finalizing.
+            if self._repl is not None and self.max_depth > 0:
+                try:
+                    self._drain_child_agents()
+                except Exception:
+                    pass
+            self.session.finalize(
+                self._final_text,
+                usage={
+                    "prompt_tokens": self._total_usage.prompt_tokens,
+                    "completion_tokens": self._total_usage.completion_tokens,
+                },
+                turns=self._turn_offset,
+                metrics=self._metrics,
+            )
+        finally:
+            if self._repl is not None:
+                self._repl.shutdown()
+                self._repl = None
+
+    def _drain_child_agents(self) -> None:
+        """Gracefully close background sub-agents in this engine's kernel.
+
+        Runs inside the kernel (where the agent registries live) so each child
+        finalizes its session — and recursively drains its own grandchildren —
+        before this engine aggregates child metrics and shuts the kernel down.
+        """
+        self._repl.execute("import rlm.api as _rlm; _rlm._drain_agents()", timeout=120)
 
     async def _compact_branch(
         self, messages: list[dict], turn: int, active_tools: list[dict]

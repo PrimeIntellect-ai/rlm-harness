@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
 
 from rlm.types import ChildSessionAggregate, ProgrammaticToolCallStats
+
+
+def _sanitize_name(name: str) -> str:
+    """Make ``name`` filesystem-safe for a session dir; non-empty and bounded."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "-", name).strip("-")
+    return (safe or "agent")[:64]
 
 
 class Session:
@@ -123,11 +130,20 @@ class Session:
         self._msg_file.close()
 
     @staticmethod
-    def child_dir(parent_dir: Path | str) -> Path:
-        """Create and return a new child session directory under parent_dir."""
-        child_id = uuid.uuid4().hex[:8]
-        child = Path(parent_dir) / f"sub-{child_id}"
-        child.mkdir()
+    def child_dir(parent_dir: Path | str, name: str | None = None) -> Path:
+        """Create and return a child session directory under ``parent_dir``.
+
+        With ``name`` the dir is ``sub-<sanitized-name>`` (stable across
+        re-sends, human-readable); otherwise a random ``sub-<id>``. The
+        ``sub-`` prefix keeps the existing ``sub-*`` discovery globs working.
+        """
+        if name is not None:
+            child = Path(parent_dir) / f"sub-{_sanitize_name(name)}"
+            child.mkdir(parents=True, exist_ok=True)
+        else:
+            child_id = uuid.uuid4().hex[:8]
+            child = Path(parent_dir) / f"sub-{child_id}"
+            child.mkdir()
         return child
 
     def close(self):
