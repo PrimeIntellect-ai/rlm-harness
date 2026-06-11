@@ -148,6 +148,27 @@ async def test_errored_agent_frees_its_total_slot(monkeypatch, tmp_path):
     await api._REGISTRY.close_all()
 
 
+async def test_construction_failure_frees_total_slot(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
+    from rlm import api
+
+    # A bad engine kwarg makes RLMEngine(**kwargs) raise *during construction* —
+    # before advance(), the path that used to skip the reap and leak the slot.
+    h1 = api.send("task a", name="a", summarize_at_tokens="not-an-int")
+    await _settle(h1, want=ERROR)
+    assert isinstance(h1.poll().error, ValueError)
+
+    # the total slot taken in send() was freed, so a new agent fits under cap=1
+    h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
+    assert (await h2.wait()).answer == "b1"
+    await api._REGISTRY.close_all()
+
+
 async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_TOOLS", "")
     monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))

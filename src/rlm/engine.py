@@ -473,30 +473,34 @@ class RLMEngine:
     async def aclose(self) -> None:
         """Finalize the session and shut the kernel down.
 
-        Idempotent; a no-op if the engine never set up (e.g. depth-limited).
+        Idempotent. A no-op if the engine never set up (e.g. depth-limited). If
+        setup() failed partway after starting the kernel, the kernel is still shut
+        down — finalize is skipped, since there is no completed run to finalize.
         """
-        if not self._setup_done:
+        if not self._setup_done and self._repl is None:
             return
+        finalize = self._setup_done
         self._setup_done = False
         try:
-            # Drain background sub-agents living in this engine's kernel so their
-            # sessions finalize (and grandchildren cascade-close) before we
-            # aggregate child metrics and shut the kernel down. Best-effort: a
-            # wedged child must not block the parent from finalizing.
-            if self._repl is not None and self.max_depth > 0:
-                try:
-                    self._drain_child_agents()
-                except Exception:
-                    pass
-            self.session.finalize(
-                self._final_text,
-                usage={
-                    "prompt_tokens": self._total_usage.prompt_tokens,
-                    "completion_tokens": self._total_usage.completion_tokens,
-                },
-                turns=self._turn_offset,
-                metrics=self._metrics,
-            )
+            if finalize:
+                # Drain background sub-agents living in this engine's kernel so
+                # their sessions finalize (and grandchildren cascade-close) before
+                # we aggregate child metrics and shut the kernel down. Best-effort:
+                # a wedged child must not block the parent from finalizing.
+                if self._repl is not None and self.max_depth > 0:
+                    try:
+                        self._drain_child_agents()
+                    except Exception:
+                        pass
+                self.session.finalize(
+                    self._final_text,
+                    usage={
+                        "prompt_tokens": self._total_usage.prompt_tokens,
+                        "completion_tokens": self._total_usage.completion_tokens,
+                    },
+                    turns=self._turn_offset,
+                    metrics=self._metrics,
+                )
         finally:
             if self._repl is not None:
                 self._repl.shutdown()

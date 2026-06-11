@@ -79,17 +79,18 @@ class _RlmProcessor:
         self._engine: RLMEngine | None = None
 
     async def process(self, prompt: str) -> RLMResult:
-        if self._engine is None:
-            kwargs = dict(self._engine_kwargs)
-            if self._session is not None:
-                kwargs.setdefault("session", self._session)
-            self._engine = RLMEngine(**kwargs)
-            self._engine.setup()
-        running_marker = await acquire_slot_blocking(RUNNING)
+        running_marker = None
         try:
+            if self._engine is None:
+                kwargs = dict(self._engine_kwargs)
+                if self._session is not None:
+                    kwargs.setdefault("session", self._session)
+                self._engine = RLMEngine(**kwargs)
+                self._engine.setup()
+            running_marker = await acquire_slot_blocking(RUNNING)
             return await self._engine.advance(prompt)
         except Exception:
-            await self._reap()  # errored agent: reap kernel + free its total slot
+            await self._reap()  # any failure (construct/setup/advance) reaps it
             raise
         finally:
             release_slot(running_marker)
