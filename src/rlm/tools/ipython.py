@@ -304,12 +304,6 @@ if {allow_recursion!r}:
                     text = content.get("data", {}).get("text/plain", "")
                     if text:
                         outputs.append(text + "\n")
-                elif msg_type in ("display_data", "update_display_data"):
-                    # Output from display() / rich reprs a normal IPython user
-                    # would see; text/plain is the headless analog (no image bytes).
-                    text = content.get("data", {}).get("text/plain", "")
-                    if text:
-                        outputs.append(text + "\n")
                 elif msg_type == "error":
                     tb = "\n".join(content.get("traceback", []))
                     tb = _ANSI_RE.sub("", tb)
