@@ -121,19 +121,48 @@ fi
 # Skills are owned by the environment (e.g. ComposableEnv uploads them to
 # /task/rlm-skills before this script runs).  Discover and install any
 # that are present so they're both importable and on PATH.
+skill_enabled() {
+    local tool_name="$1"
+
+    # Unset means install every uploaded skill. Set to an empty string to
+    # install none, or to a comma-separated allowlist of import/CLI names.
+    if [ -z "${RLM_SKILLS+x}" ]; then
+        return 0
+    fi
+    if [ -z "$RLM_SKILLS" ]; then
+        return 1
+    fi
+
+    local IFS=","
+    local allowed
+    for allowed in $RLM_SKILLS; do
+        allowed="$(echo "$allowed" | tr -d '[:space:]' | tr '-' '_')"
+        if [ "$allowed" = "$tool_name" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 SKILL_ARGS=""
 SKILL_TOOL_NAMES=""
 if [ -d /task/rlm-skills ]; then
     for skill_dir in /task/rlm-skills/*/; do
         [ -f "$skill_dir/pyproject.toml" ] || continue
         skill_name=$(grep '^name' "$skill_dir/pyproject.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-        SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
+        tool_name=""
         for candidate in "$skill_dir"/src/*; do
             [ -d "$candidate" ] || continue
             [ "$(basename "$candidate")" = "__pycache__" ] && continue
-            SKILL_TOOL_NAMES="$SKILL_TOOL_NAMES $(basename "$candidate")"
+            tool_name="$(basename "$candidate")"
             break
         done
+        [ -n "$tool_name" ] || continue
+        if ! skill_enabled "$tool_name"; then
+            continue
+        fi
+        SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
+        SKILL_TOOL_NAMES="$SKILL_TOOL_NAMES $tool_name"
     done
 fi
 

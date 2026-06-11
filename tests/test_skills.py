@@ -21,8 +21,38 @@ from conftest import (
     show_tool_result,
     tool_result,
 )
-
 from rlm.engine import RLMEngine
+from rlm.tools.skills import get_installed_skills
+
+
+def test_installed_skills_default_all(monkeypatch):
+    monkeypatch.delenv("RLM_SKILLS", raising=False)
+
+    assert get_installed_skills() == ["boom", "say"]
+
+
+def test_installed_skills_allowlist(monkeypatch):
+    monkeypatch.setenv("RLM_SKILLS", "say")
+
+    assert get_installed_skills() == ["say"]
+
+
+def test_installed_skills_empty_allowlist(monkeypatch):
+    monkeypatch.setenv("RLM_SKILLS", "")
+
+    assert get_installed_skills() == []
+
+
+def test_installed_skills_unknown_allowlist(monkeypatch):
+    monkeypatch.setenv("RLM_SKILLS", "missing")
+
+    try:
+        get_installed_skills()
+    except ValueError as exc:
+        assert "RLM_SKILLS contains unknown skill" in str(exc)
+        assert "missing" in str(exc)
+    else:
+        raise AssertionError("expected unknown RLM_SKILLS entry to raise")
 
 
 async def test_python_skill_valid(session):

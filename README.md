@@ -61,6 +61,7 @@ All configuration is via environment variables:
 | `PRIME_API_KEY` | — | PI Inference pair: targets `https://api.pinference.ai/api/v1` and forwards `PRIME_TEAM_ID` as `X-Prime-Team-ID` when set. |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | resolved by SDK | OpenAI pair — when `OPENAI_API_KEY` is set, AsyncOpenAI's native env handling is used (covers OpenAI direct and verifiers' rollout tunnel both). Provider precedence: explicit → PI → OpenAI. Keys are scoped to their own base URL so an `OPENAI_API_KEY` lying around can't leak to PI Inference. |
 | `RLM_TOOLS` | `ipython` | Comma-separated subset of builtin tools (`ipython`, `bash`, `edit`) to enable. Empty string = no tools. Unknown names raise. |
+| `RLM_SKILLS` | all installed skills | Comma-separated allowlist of uploaded skills to install/expose/pre-import. Unset = all skills, empty string = no skills. |
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
@@ -120,6 +121,8 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 ## Skills
 
 `rlm` itself ships no skills. Skills are supplied by the host environment: before `install.sh` runs, the environment places skill packages under `/task/rlm-skills/<name>/`, and `install.sh` installs them alongside `rlm` so they're both importable and on `$PATH`.
+
+Set `RLM_SKILLS` to restrict this surface. Unset installs and exposes every uploaded skill, `RLM_SKILLS=""` disables uploaded skills, and a comma-separated list such as `RLM_SKILLS=websearch,search_docs` installs/exposes only those skills. The same filter controls system-prompt skill text and IPython pre-imports.
 
 From IPython, import a skill and call its async `run(...)` entrypoint:
 

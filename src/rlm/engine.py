@@ -26,7 +26,6 @@ from rlm.tools import (
 )
 from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
 
-
 # Injected as a user message when the branch's context size reaches the
 # compaction threshold. The model's next reply is expected to be a
 # plain-text handoff summary; any tool calls it emits are ignored and
@@ -519,10 +518,11 @@ class RLMEngine:
     ) -> str:
         if self.system_prompt_path:
             return Path(self.system_prompt_path).read_text()
+        installed_skills = get_installed_skills()
         system_prompt = build_system_prompt(
             self.cwd,
-            str(SKILLS_DIR) if SKILLS_DIR is not None else None,
-            get_installed_skills(),
+            str(SKILLS_DIR) if SKILLS_DIR is not None and installed_skills else None,
+            installed_skills,
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             active_tools=active_tools,
