@@ -116,10 +116,11 @@ just produces many results instead of one.
   is the live transcript the model can read/tail (this is "message history = the
   path"). `None` for tools without a transcript.
 
-**Agent lifecycle.** Workers (and their sub-kernels) are torn down by the
-end-of-rollout cascade (parent `aclose` → drain registries). An abandoned (or
-errored) agent holds its live-agent slot and kernel until the rollout ends, so
-the cap (§3.7) bounds agents *spawned per rollout*, not just concurrent ones.
+**Agent lifecycle.** A healthy idle agent stays resident — its kernel alive,
+holding a *total* slot — until the end-of-rollout cascade tears it down (parent
+`aclose` → drain registries); to abandon one the model just stops sending to it.
+An *errored* agent is reaped eagerly (kernel shut, total slot freed) but stays
+pollable for its error. The two caps are detailed in §3.7.
 
 **No per-name lookup API.** The model keeps handles in its own variables (the
 IPython namespace persists across tool calls) and re-`send`s a name to continue.
@@ -247,20 +248,30 @@ one level deeper), mirroring the per-kernel registries:
   `aggregate_child_metrics`) runs at the end of `_run_loop`, *before*
   `repl.shutdown()` in `run()`'s `finally`, so live children under-count.
   New order: **drain live agents → parent finalize → kill kernel.**
-- **Global cap via marker files** (crash-safe). One marker file per live agent
-  (`<pid>-<uuid>.marker`) in a per-rollout dir shared by the whole process tree:
-  the root derives `RLM_LIVE_AGENTS_DIR` from its session and it propagates to
-  every kernel via `_inject_startup`. An `flock` serializes sweep-count-create; a
-  PID-liveness sweep on each acquire reclaims slots leaked by hard-killed
-  processes (an integer counter could not). At cap, `send` **raises**
-  `AgentLimitReached` — a creation-time failure, uniform across tools (any tool's
-  `send` raises it) and distinct from the `poll().error` runtime channel; this
-  supersedes the earlier "terminal handle" sketch. The one-off path
-  (`await rlm(...)`, `gather(...)`) is capped too but **blocks** until a slot
-  frees (the model awaits it anyway); a safety timeout `RLM_AGENT_WAIT_TIMEOUT`
-  (default 300s, `0` = forever) proceeds over-cap rather than deadlock when
-  slot-holders are themselves waiting for slots. The root rollout (depth 0) is
-  not capped. Env: `RLM_MAX_LIVE_AGENTS`.
+- **Two caps via marker files** (crash-safe), independent pools in subdirs of a
+  per-rollout dir shared by the whole process tree: the root derives
+  `RLM_LIVE_AGENTS_DIR` from its session and it propagates to every kernel via
+  `_inject_startup`. One marker file per held slot (`<pid>-<uuid>.marker`); an
+  `flock` serializes sweep-count-create and a PID-liveness sweep on each acquire
+  reclaims slots leaked by hard-killed processes (an integer counter could not).
+  - **Total** (`RLM_MAX_LIVE_AGENTS`) — *resident* agents. A slot is held from
+    creation to teardown; bounds how many sub-agents (and their kernels) exist at
+    once. `send` **raises** `AgentLimitReached` at cap — a creation-time failure,
+    uniform across tools and distinct from the `poll().error` runtime channel
+    (supersedes the earlier "terminal handle" sketch). The model's recourse is to
+    reuse an existing agent (re-`send` its name — continuation takes no new slot).
+  - **Running** (`RLM_MAX_RUNNING_AGENTS`) — *executing* agents. A slot is held
+    only around `advance()` (one turn); an idle agent that *could* take another
+    query holds none. Acquired **blocking** (the turn waits its turn). This is the
+    parallelism knob.
+  - An **errored** turn frees both: the running slot via its `finally`, and —
+    because a halted agent is dead weight — the total slot too, reaping the kernel
+    while keeping `poll().error` intact.
+  - The one-off path (`await rlm(...)`, `gather(...)`) holds both for its lifetime
+    and **blocks** on each. A safety timeout `RLM_AGENT_WAIT_TIMEOUT` (default
+    300s, `0` = forever) proceeds over-cap rather than deadlock when slot-holders
+    are themselves waiting for slots (e.g. a parent turn awaiting a nested child).
+    The root rollout (depth 0) is not capped.
 
 ### 3.8 Open questions (Phase 1)
 
@@ -341,7 +352,8 @@ done-callback writing the channel.
   - `rlm.send` (named continuation; no public per-name lookup); wired into
     `_inject_startup`.
   - Graceful teardown cascade + finalize/shutdown re-ordering.
-  - Marker-file global cap (`RLM_MAX_LIVE_AGENTS`).
+  - Marker-file caps: total resident (`RLM_MAX_LIVE_AGENTS`) + running
+    parallelism (`RLM_MAX_RUNNING_AGENTS`), with eager reap on error.
   - Session-path transcript access (`handle.session_dir`).
 - **PR 2 — harness wiring.** New env vars into v1 `RLMProgramConfig` and
   composable `rlm_harness`.

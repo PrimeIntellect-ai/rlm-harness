@@ -8,7 +8,7 @@ import asyncio
 import pytest
 from conftest import DummyClient, DummyMessage
 
-from rlm._async_runtime import FINISHED
+from rlm._async_runtime import ERROR, FINISHED
 from rlm._agent_limit import AgentLimitReached
 
 
@@ -123,6 +123,31 @@ async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
     await api._REGISTRY.close_all()
 
 
+async def test_errored_agent_frees_its_total_slot(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
+    from rlm import api
+
+    class _BoomClient:  # raises when the engine reaches for the chat API
+        @property
+        def chat(self):
+            raise RuntimeError("boom")
+
+    h1 = api.send("task a", name="a", client=_BoomClient())
+    await _settle(h1, want=ERROR)
+    assert isinstance(h1.poll().error, RuntimeError)
+
+    # the errored agent reaped its kernel and freed its total slot, so a new
+    # agent fits under the cap of 1 — no dismiss needed
+    h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
+    assert (await h2.wait()).answer == "b1"
+    await api._REGISTRY.close_all()
+
+
 async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_TOOLS", "")
     monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
@@ -133,7 +158,7 @@ async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     from rlm import _agent_limit as lim
     from rlm import api
 
-    granted, held = lim.acquire_slot()  # occupy the only slot
+    granted, held = lim.acquire_slot(lim.TOTAL)  # occupy the only slot
     assert granted
 
     started = asyncio.ensure_future(

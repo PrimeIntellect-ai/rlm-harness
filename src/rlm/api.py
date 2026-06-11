@@ -6,6 +6,8 @@ import asyncio
 import os
 
 from rlm._agent_limit import (
+    RUNNING,
+    TOTAL,
     AgentLimitReached,
     acquire_slot,
     acquire_slot_blocking,
@@ -29,21 +31,24 @@ def _child_session(name: str | None = None) -> Session | None:
 async def run(prompt: str, **kwargs) -> RLMResult:
     """Run a single rlm agent to completion (blocking).
 
-    A sub-agent (depth > 0) counts against the live-agent cap and **waits** for a
-    free slot (unlike ``send``, which raises). The root rollout is not capped.
+    A sub-agent (depth > 0) counts against both caps and **waits** for a slot in
+    each (total, then running) — unlike ``send``, which raises on the total cap.
+    The root rollout is not capped.
     """
     if "session" not in kwargs:
         child = _child_session()
         if child:
             kwargs["session"] = child
-    marker = None
+    total_marker = running_marker = None
     if int(os.environ.get("RLM_DEPTH", "0")) > 0:
-        marker = await acquire_slot_blocking()
+        total_marker = await acquire_slot_blocking(TOTAL)
+        running_marker = await acquire_slot_blocking(RUNNING)
     try:
         engine = RLMEngine(**kwargs)
         return await engine.run(prompt)
     finally:
-        release_slot(marker)
+        release_slot(running_marker)
+        release_slot(total_marker)
 
 
 # --- Background, named, persistent sub-agents ------------------------------
@@ -60,12 +65,17 @@ class _RlmProcessor:
     The engine is created and set up lazily on the first item so ``send``
     returns without blocking on kernel startup. Re-sending the same name appends
     a turn to the same engine (a multi-turn conversation).
+
+    Slots: the engine holds a *total* slot from creation to teardown, and a
+    *running* slot only while a turn executes (acquired per ``advance``). A turn
+    that errors reaps the engine (kernel + total slot) eagerly, leaving the worker
+    in its error state so the model can still read ``poll().error``.
     """
 
-    def __init__(self, session: Session | None, engine_kwargs: dict, marker=None):
+    def __init__(self, session: Session | None, engine_kwargs: dict, total_marker=None):
         self._session = session
         self._engine_kwargs = engine_kwargs
-        self._marker = marker
+        self._total_marker = total_marker
         self._engine: RLMEngine | None = None
 
     async def process(self, prompt: str) -> RLMResult:
@@ -75,14 +85,26 @@ class _RlmProcessor:
                 kwargs.setdefault("session", self._session)
             self._engine = RLMEngine(**kwargs)
             self._engine.setup()
-        return await self._engine.advance(prompt)
+        running_marker = await acquire_slot_blocking(RUNNING)
+        try:
+            return await self._engine.advance(prompt)
+        except Exception:
+            await self._reap()  # errored agent: reap kernel + free its total slot
+            raise
+        finally:
+            release_slot(running_marker)
 
-    async def teardown(self) -> None:
+    async def _reap(self) -> None:
+        """Shut the engine's kernel and free its total slot (idempotent)."""
         try:
             if self._engine is not None:
                 await self._engine.aclose()
         finally:
-            release_slot(self._marker)
+            release_slot(self._total_marker)
+            self._total_marker = None
+
+    async def teardown(self) -> None:
+        await self._reap()
 
 
 def send(
@@ -117,16 +139,17 @@ def send(
     if max_tokens is not None:
         engine_kwargs.setdefault("max_tokens", max_tokens)
 
-    # Reserve a live-agent slot for a *new* agent (continuation reuses its slot).
+    # Reserve a *total* (resident) slot for a new agent; continuation reuses it.
     # At capacity, raise rather than silently spawning — distinct from a runtime
-    # failure surfaced via poll().error.
+    # failure surfaced via poll().error. The per-turn running slot is taken inside
+    # the processor.
     is_new = name is None or _REGISTRY.get(name) is None
-    marker = None
+    total_marker = None
     if is_new:
-        granted, marker = acquire_slot()
+        granted, total_marker = acquire_slot(TOTAL)
         if not granted:
             raise AgentLimitReached(
-                "live sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
+                "total sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
                 "reuse an existing agent (re-send its name) instead of starting another"
             )
 
@@ -138,7 +161,9 @@ def send(
         return session.dir if session is not None else None
 
     def processor_factory(agent_name: str) -> _RlmProcessor:
-        return _RlmProcessor(holder.get("session"), engine_kwargs, marker=marker)
+        return _RlmProcessor(
+            holder.get("session"), engine_kwargs, total_marker=total_marker
+        )
 
     return _REGISTRY.send(
         prompt,
