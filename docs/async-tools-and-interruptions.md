@@ -118,8 +118,11 @@ just produces many results instead of one.
   is the live transcript the model can read/tail (this is "message history = the
   path"). `None` for tools without a transcript.
 
-**Registry:** `rlm.get(name) -> Handle | None`, `rlm.list() -> list[str]` — so
-the model can poll by name in a later cell without keeping the handle var.
+**No per-name lookup API.** The model keeps handles in its own variables (the
+IPython namespace persists across tool calls) and re-`send`s a name to continue.
+A registry exists internally only so `send(name)` can find an existing agent; it
+is deliberately not exposed — `get`/`list` would be rlm-specific surface that
+breaks the uniform `send` → `handle` → `poll` shape every tool shares.
 
 **The uniform poll object** (`ToolState` — working name; the "messages object"):
 
@@ -326,7 +329,8 @@ done-callback writing the channel.
     + `ToolState`.
   - Queueing (per-name inbox, sequential drain, editable `queued`).
   - Resumable engine (`setup`/`advance`), rlm stateful processor.
-  - `rlm.send` / `rlm.get` / `rlm.list`; wired into `_inject_startup`.
+  - `rlm.send` (named continuation; no public per-name lookup); wired into
+    `_inject_startup`.
   - Graceful-dismiss cascade + finalize/shutdown re-ordering.
   - Marker-file global cap (`RLM_MAX_LIVE_AGENTS`).
   - Session-path transcript access (`handle.session_dir`).

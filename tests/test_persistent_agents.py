@@ -30,8 +30,6 @@ async def test_send_runs_named_agent(monkeypatch, tmp_path):
     result = await handle.wait()
 
     assert result.answer == "first answer"
-    assert "probe" in api.list_agents()
-    assert api.get("probe") is not None
     # transcript path is nested under the parent session as sub-<name>
     assert handle.session_dir is not None
     assert handle.session_dir.name == "sub-probe"
@@ -39,7 +37,7 @@ async def test_send_runs_named_agent(monkeypatch, tmp_path):
 
     handle.dismiss()
     await asyncio.sleep(0.05)
-    assert api.get("probe") is None
+    assert api._REGISTRY.get("probe") is None  # dismiss removes from the registry
 
 
 async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):

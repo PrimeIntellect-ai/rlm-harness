@@ -107,16 +107,6 @@ def send(
     )
 
 
-def get(name: str) -> Handle | None:
-    """Return a handle to the named sub-agent, or ``None`` if there is none."""
-    return _REGISTRY.get(name)
-
-
-def list_agents() -> list[str]:
-    """Return the names of live sub-agents spawned from this kernel."""
-    return _REGISTRY.list()
-
-
 def _drain_agents() -> None:
     """Synchronously close every background agent in this kernel (all registries).
 

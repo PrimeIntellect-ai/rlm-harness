@@ -77,7 +77,6 @@ def test_recursion_api_advertised_when_allowed():
     assert "await rlm(" in prompt
     assert "rlm.send(" in prompt
     assert "handle.poll()" in prompt
-    assert "rlm.list_agents()" in prompt
 
 
 def test_recursion_api_omitted_when_disallowed():
