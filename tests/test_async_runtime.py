@@ -124,12 +124,12 @@ async def test_error_surfaces_live_exception():
     assert isinstance(state.error, ValueError)
     with pytest.raises(ValueError, match="boom"):
         await handle.wait()
-    # reusing an errored name is refused until dismissed
-    with pytest.raises(RuntimeError, match="error state"):
+    # reusing an errored name is refused; start a fresh one under a different name
+    with pytest.raises(RuntimeError, match="halted with an error"):
         reg.send(2, name="w", processor_factory=lambda _n: _Boom())
 
 
-async def test_dismiss_removes_and_tears_down():
+async def test_close_all_tears_down_workers():
     class _P:
         def __init__(self):
             self.torn = False
@@ -144,8 +144,7 @@ async def test_dismiss_removes_and_tears_down():
     proc = _P()
     handle = reg.send(1, name="w", processor_factory=lambda _n: proc)
     await _settle(handle)
-    handle.dismiss()
-    await asyncio.sleep(0.05)
+    await reg.close_all()
     assert reg.get("w") is None
     assert proc.torn is True
 

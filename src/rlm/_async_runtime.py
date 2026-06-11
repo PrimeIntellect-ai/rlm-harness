@@ -60,7 +60,7 @@ class Processor(Protocol):
     """Turns one queued input into a result, plus one-shot teardown.
 
     ``process`` is called once per queued item, in order; ``teardown`` runs once
-    when the worker is dismissed/closed.
+    when the worker is closed.
     """
 
     async def process(self, item: Any) -> Any: ...
@@ -132,7 +132,7 @@ class BackgroundWorker:
     def submit(self, item: Any) -> None:
         if self._status == ERROR:
             raise RuntimeError(
-                f"worker {self.name!r} is in an error state; dismiss and recreate"
+                f"worker {self.name!r} halted with an error; send to a different name"
             )
         self.queued.append(item)
         self._status = RUNNING
@@ -189,22 +189,11 @@ class BackgroundWorker:
         await self._processor.teardown()
 
 
-# Strong refs to in-flight dismiss/teardown coroutines so they aren't GC'd.
-_DETACHED: set[asyncio.Future] = set()
-
-
-def _detach(coro: Awaitable[Any]) -> None:
-    task = asyncio.ensure_future(coro)
-    _DETACHED.add(task)
-    task.add_done_callback(_DETACHED.discard)
-
-
 class Handle:
     """Model-facing reference to a background worker."""
 
-    def __init__(self, worker: BackgroundWorker, registry: "Registry | None" = None):
+    def __init__(self, worker: BackgroundWorker):
         self._worker = worker
-        self._registry = registry
 
     @property
     def name(self) -> str:
@@ -221,12 +210,6 @@ class Handle:
 
     async def wait(self) -> Any:
         return await self._worker.wait()
-
-    def dismiss(self) -> None:
-        """Remove from the registry and request graceful teardown (detached)."""
-        if self._registry is not None:
-            self._registry.remove(self._worker.name)
-        _detach(self._worker.close())
 
     def __repr__(self) -> str:
         return f"Handle(name={self._worker.name!r}, status={self._worker.status!r})"
@@ -257,7 +240,7 @@ class Registry:
 
     def get(self, name: str) -> Handle | None:
         worker = self._workers.get(name)
-        return Handle(worker, self) if worker is not None else None
+        return Handle(worker) if worker is not None else None
 
     def list(self) -> list[str]:
         return sorted(self._workers)
@@ -288,7 +271,7 @@ class Registry:
         worker = self._workers.get(name)
         if worker is not None and worker.status == ERROR:
             raise RuntimeError(
-                f"agent {name!r} is in an error state; dismiss it before reusing the name"
+                f"agent {name!r} halted with an error; start a fresh one under a different name"
             )
         if worker is None:
             session_dir = (
@@ -299,10 +282,7 @@ class Registry:
             )
             self._workers[name] = worker
         worker.submit(item)
-        return Handle(worker, self)
-
-    def remove(self, name: str) -> None:
-        self._workers.pop(name, None)
+        return Handle(worker)
 
     async def close_all(self) -> None:
         """Gracefully close every worker (used on kernel/agent teardown)."""

@@ -37,9 +37,8 @@ async def test_send_runs_named_agent(monkeypatch, tmp_path):
     assert handle.session_dir.name == "sub-probe"
     assert handle.session_dir.parent == tmp_path
 
-    handle.dismiss()
-    await asyncio.sleep(0.05)
-    assert api._REGISTRY.get("probe") is None  # dismiss removes from the registry
+    await api._REGISTRY.close_all()
+    assert api._REGISTRY.get("probe") is None  # teardown clears the registry
 
 
 async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):
@@ -58,8 +57,7 @@ async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):
     api.send("second", name="chat")  # continue: same engine + client
     assert (await handle.wait()).answer == "answer two"
 
-    handle.dismiss()
-    await asyncio.sleep(0.05)
+    await api._REGISTRY.close_all()
 
 
 async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
@@ -84,8 +82,7 @@ async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
     assert h1.session_dir == h2.session_dir
     assert h2.session_dir.name == "sub-foo-bar"
 
-    h2.dismiss()
-    await asyncio.sleep(0.05)
+    await api._REGISTRY.close_all()
 
 
 def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
@@ -107,7 +104,7 @@ async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
     from rlm import api
 
-    h1 = api.send(
+    api.send(
         "task a",
         name="a",
         client=DummyClient([DummyMessage(content="a1"), DummyMessage(content="a2")]),
@@ -117,15 +114,13 @@ async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
         api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
 
     # continuing the same agent needs no new slot
-    api.send("more a", name="a")  # no raise
+    api.send("more a", name="a")  # no raise (reuses a's slot)
 
-    # freeing the slot lets a new agent start
-    h1.dismiss()
-    await asyncio.sleep(0.05)
+    # teardown is the only thing that frees slots now; afterward a new agent starts
+    await api._REGISTRY.close_all()
     h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
     assert (await h2.wait()).answer == "b1"
-    h2.dismiss()
-    await asyncio.sleep(0.05)
+    await api._REGISTRY.close_all()
 
 
 async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):

@@ -29,11 +29,11 @@ limitations follow:
   check on it in another. Long sub-agent work also risks being killed by the
   per-cell exec timeout (`RLM_EXEC_TIMEOUT`, capped at 600s in `IPythonREPL`).
 - **No persistence / multi-turn.** The model can't stand up a *specialist*
-  sub-agent, ask it repeatedly, and dismiss it when it goes down a wrong path.
+  sub-agent and ask it repeatedly across tool calls.
 
 The headline goal is **persistent, named sub-agents the parent can hold
-multi-turn conversations with** — create a specialist, keep asking, dismiss when
-cooked — plus quick one-offs. The same background/poll mechanism generalizes to
+multi-turn conversations with** — create a specialist and keep asking it (just
+stop sending to abandon one) — plus quick one-offs. The same background/poll mechanism generalizes to
 all programmatic callables (skills); for those, persistence is not required and
 the value is purely offloading.
 
@@ -112,11 +112,14 @@ just produces many results instead of one.
 - `.poll() -> ToolState` — **sync**; a snapshot of dynamic state (below). Pure
   read — never mutates or consumes.
 - `.wait() -> <result>` — async; await the next result.
-- `.dismiss()` — graceful teardown (drain/cancel, finalize session, shut
-  sub-kernel). Sync request; teardown runs in the background.
 - `.session_dir` — for `rlm`, the agent's session dir; `session_dir/"messages.jsonl"`
   is the live transcript the model can read/tail (this is "message history = the
   path"). `None` for tools without a transcript.
+
+**Agent lifecycle.** Workers (and their sub-kernels) are torn down by the
+end-of-rollout cascade (parent `aclose` → drain registries). An abandoned (or
+errored) agent holds its live-agent slot and kernel until the rollout ends, so
+the cap (§3.7) bounds agents *spawned per rollout*, not just concurrent ones.
 
 **No per-name lookup API.** The model keeps handles in its own variables (the
 IPython namespace persists across tool calls) and re-`send`s a name to continue.
@@ -145,8 +148,8 @@ breaks the uniform `send` → `handle` → `poll` shape every tool shares.
 or `error` with one good result already in the FIFO, are both valid (an errored
 turn halts the worker, as the engine does today).
 
-**Sync vs async:** `send`/`poll`/`get`/`list`/`dismiss` are sync (`h = rlm.send(...)`
-returns immediately); `run`/`wait` are async.
+**Sync vs async:** `send`/`poll` are sync (`h = rlm.send(...)` returns
+immediately); `run`/`wait` are async.
 
 **Discoverability:** signature + docstring are mirrored onto the wrapped callable
 (as `_wrap_callable` already does for `run` via `__signature__`/`__doc__`), so
@@ -186,7 +189,7 @@ queueing for skills.
     run the loop to the next stop, return the result. Callable repeatedly.
   - `run()` stays = `setup()` + one `advance()` + teardown (unchanged blocking
     path).
-- **Defer REPL teardown** for persistent agents until `dismiss()` / cascade.
+- **Defer REPL teardown** for persistent agents until the end-of-rollout cascade.
 - rlm's processor = `advance` on the live engine; a reused `name` = the same
   engine = a multi-turn conversation with a persistent specialist.
 - **Forward-compat (Phase 2):** keep the model-completion call centralized in
@@ -236,7 +239,7 @@ one level deeper), mirroring the per-kernel registries:
 
 ### 3.7 Lifecycle, teardown, caps (in this PR)
 
-- **Graceful-dismiss cascade.** `dismiss` (and parent teardown) must drain/cancel
+- **Graceful teardown cascade.** Parent teardown (`aclose`) must drain/cancel
   → finalize the session → *then* shut the sub-kernel. A hard
   `shutdown_kernel(now=True)` on a parent **orphans descendants' kernels**, so
   teardown recurses gracefully (each level closes its registry before its kernel
@@ -337,7 +340,7 @@ done-callback writing the channel.
   - Resumable engine (`setup`/`advance`), rlm stateful processor.
   - `rlm.send` (named continuation; no public per-name lookup); wired into
     `_inject_startup`.
-  - Graceful-dismiss cascade + finalize/shutdown re-ordering.
+  - Graceful teardown cascade + finalize/shutdown re-ordering.
   - Marker-file global cap (`RLM_MAX_LIVE_AGENTS`).
   - Session-path transcript access (`handle.session_dir`).
 - **PR 2 — harness wiring.** New env vars into v1 `RLMProgramConfig` and
@@ -349,5 +352,5 @@ done-callback writing the channel.
 - Interruptions / mid-stream generation control / stopping vLLM generation.
 - Wall-clock/time budgets.
 - Determinism / virtual-time concurrency.
-- Rehydrating a dismissed agent from disk (the namespaced `messages.jsonl` keeps
-  the door open, but replay-persistence is not built in Phase 1).
+- Rehydrating an agent from disk after teardown (the namespaced `messages.jsonl`
+  keeps the door open, but replay-persistence is not built in Phase 1).

@@ -127,7 +127,7 @@ def send(
         if not granted:
             raise AgentLimitReached(
                 "live sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
-                "dismiss an agent before starting another"
+                "reuse an existing agent (re-send its name) instead of starting another"
             )
 
     holder: dict[str, Session | None] = {}
