@@ -57,6 +57,11 @@ IPYTHON_CONTROL_PROMPT = (
     "repo use its documented commands, `uv run ...`, `.venv/bin/python ...`, "
     "or the active project interpreter from the repo root. Treat failures from "
     "that native environment as the relevant result."
+    "\n\n"
+    "Use Python for reading, searching, and editing files — it gives you "
+    "reusable variables you can slice, filter, and act on without re-reading. "
+    "Always assign read/search results to named variables so you can revisit "
+    "them later."
 )
 
 
