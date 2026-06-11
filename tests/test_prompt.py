@@ -62,3 +62,23 @@ def test_ipython_control_prompt_included_for_ipython_tool():
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
     assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
+
+
+def test_recursion_api_advertised_when_allowed():
+    prompt = build_system_prompt(
+        "/repo",
+        None,
+        [],
+        "/repo/.rlm/messages.jsonl",
+        allow_recursion=True,
+        active_tools=[_Tool("ipython")],
+    )
+
+    assert "await rlm(" in prompt
+    assert "rlm.send(" in prompt
+    assert "handle.poll()" in prompt
+
+
+def test_recursion_api_omitted_when_disallowed():
+    # _prompt() builds with allow_recursion=False.
+    assert "rlm.send(" not in _prompt([_Tool("ipython")])

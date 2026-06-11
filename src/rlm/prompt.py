@@ -108,6 +108,11 @@ def build_system_prompt(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "
             "Discover its CLI usage with `<skill> --help`."
         )
+        skill_lines.append(
+            "To offload a slow skill call, run it in the background: "
+            "`handle = <skill>.send(...)`, then check `handle.poll()` later "
+            "(same handle API as sub-agents)."
+        )
     if skill_lines:
         parts.extend(["", *skill_lines])
 
@@ -115,8 +120,11 @@ def build_system_prompt(
         parts.extend(
             [
                 "",
-                "A callable `rlm` is already in your global namespace — call it directly with `await rlm('sub-task')` to spawn a recursive sub-agent. Returns an `RLMResult` with `.answer` (string), `.usage`, `.turns`, and `.session_dir`.",
-                "For parallel sub-agents, use normal Python async patterns such as `await asyncio.gather(rlm('task1'), rlm('task2'))`.",
+                "A callable `rlm` is already in your global namespace for spawning recursive sub-agents.",
+                "- One-off (blocking): `await rlm('sub-task')` runs a sub-agent to completion and returns an `RLMResult` (`.answer`, `.usage`, `.turns`, `.session_dir`). Run several at once with `await asyncio.gather(rlm('a'), rlm('b'))`.",
+                "- Persistent (background): `rlm.send('sub-task', name='helper')` (omit `name` for an auto-generated one) starts a named sub-agent and returns a handle immediately — start it in one tool call and check on it in a later one. Re-`send` the same `name` to continue that agent's conversation, so you can keep a specialist around and ask it repeatedly.",
+                "- `handle.poll()` reports its state without blocking: `.status` is 'running', 'finished', or 'error'; `.results` is a FIFO of finished `RLMResult`s (take the next with `.results.popleft()`); `.queued` is the editable list of not-yet-started prompts; `.error` is the exception if it failed. Use `await handle.wait()` to block for the next result.",
+                "- Keep the handle in a variable to poll it from a later tool call (your IPython namespace persists across calls). Inspect the full API with `help(rlm.send)`.",
             ]
         )
 
