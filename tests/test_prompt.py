@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from rlm.prompt import (
+    EDIT_SKILL_PROMPT,
     GIT_HISTORY_GUARD_PROMPT,
     IPYTHON_CONTROL_PROMPT,
     build_system_prompt,
@@ -16,11 +17,15 @@ class _Tool:
     name: str
 
 
-def _prompt(active_tools: list[_Tool]) -> str:
+def _prompt(
+    active_tools: list[_Tool],
+    *,
+    installed_skills: list[str] | None = None,
+) -> str:
     return build_system_prompt(
         "/repo",
         None,
-        [],
+        installed_skills or [],
         "/repo/.rlm/messages.jsonl",
         allow_recursion=False,
         active_tools=active_tools,
@@ -62,3 +67,18 @@ def test_ipython_control_prompt_included_for_ipython_tool():
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
     assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
+
+
+def test_edit_skill_prompt_included_when_edit_is_installed():
+    prompt = _prompt([_Tool("ipython")], installed_skills=["edit"])
+
+    assert EDIT_SKILL_PROMPT in prompt
+    assert 'await edit(path="relative/file.py"' in prompt
+    assert "`old_str` must appear exactly once" in prompt
+    assert "do not use `file`, `old`, `new`, line numbers" in prompt
+
+
+def test_edit_skill_prompt_omitted_without_edit_skill():
+    prompt = _prompt([_Tool("ipython")], installed_skills=["search_docs"])
+
+    assert EDIT_SKILL_PROMPT not in prompt

@@ -63,6 +63,17 @@ IPYTHON_CONTROL_PROMPT = (
     "Always assign read/search results to named variables so you can revisit "
     "them later."
 )
+EDIT_SKILL_PROMPT = (
+    "For file changes that are exact replacements, prefer the pre-imported "
+    "`edit` skill over manual file writes. Use exactly "
+    "`await edit(path=\"relative/file.py\", old_str=\"\"\"old text\"\"\", "
+    "new_str=\"\"\"new text\"\"\")`. The target `old_str` must appear exactly "
+    "once. The supported keyword arguments are `path`, `old_str`, `new_str`, "
+    "and optional `cwd`; do not use `file`, `old`, `new`, line numbers, "
+    "`after`, or `insert`. If the replacement is not unique or the change is "
+    "too broad for an exact string replacement, then use normal Python file "
+    "I/O."
+)
 
 
 def build_system_prompt(
@@ -108,6 +119,8 @@ def build_system_prompt(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "
             "Discover its CLI usage with `<skill> --help`."
         )
+        if "edit" in installed_skills:
+            skill_lines.append(EDIT_SKILL_PROMPT)
     if skill_lines:
         parts.extend(["", *skill_lines])
 
