@@ -1,11 +1,14 @@
 # Async, persistent sub-agents & programmatic tools (+ interruptions)
 
-Status: design / not yet implemented.
+Status: design. Phase 1 in progress on `sebastian/persistent-tools-2026-06-11`.
+M0 (a backgrounded task progresses between cells) is **verified**. The IPython
+`display_data` capture gap is fixed separately (branch
+`fix/ipython-capture-display-data`).
 
 This document covers two related-but-separate systems:
 
 1. **Async tool calling** — background, pollable, and (for `rlm`) persistent
-   multi-turn programmatic callables. **Build first.**
+   multi-turn programmatic callables. **Build first** (PR 1).
 2. **Interruptions** — an async hook that preempts the model's *thinking* (not
    its tool calls) to inject context. **Deferred.** Overview only, captured here
    so Phase 1 doesn't build in a direction that makes Phase 2 harder.
@@ -70,15 +73,20 @@ the value is purely offloading.
 - **Sessions** (`session.py`): nested `sub-<id>/` dirs, `meta.json` +
   `messages.jsonl`; metrics aggregate up the tree
   (`aggregate_child_metrics`, globs `sub-*`).
+- **What a cell surfaces to the model** = the kernel's captured output:
+  `stream` (stdout/stderr), `execute_result`, `display_data`, and `error`
+  (traceback). `display_data` capture was missing and is fixed on
+  `fix/ipython-capture-display-data`.
 - **Already possible:** within-cell parallelism via
   `await asyncio.gather(rlm(a), rlm(b))`. The new capability is **cross-cell
   lifecycle**, not parallelism per se.
 
-### Load-bearing assumption
+### Load-bearing assumption — VERIFIED (M0)
 
-Background tasks progress between cells under the **pinned** ipykernel /
-nest_asyncio versions. This must be verified empirically before anything else
-(see M0).
+A backgrounded asyncio task created in one cell keeps progressing between cells:
+a probe counter advanced `0 → 71 → 119` across separate `execute()` calls (and
+`done=False` = still live). The whole design rests on this; it holds under the
+pinned ipykernel / nest_asyncio.
 
 ---
 
@@ -86,150 +94,169 @@ nest_asyncio versions. This must be verified empirically before anything else
 
 ### 3.1 API surface
 
-**One unified background primitive for every callable** (`rlm` and skills): you
-`send` data/input to a tool and `poll` it at will. Tool-specific kwargs differ;
-the handle/poll protocol is identical.
+**One background primitive, uniform across every callable** (`rlm` and skills):
+you `send` input to a tool and `poll` it at will. Tool-specific kwargs differ;
+the handle/poll protocol is identical, so `rlm` gets *no* special surface — it
+just produces many results instead of one.
 
-- `X.run(*a, **kw)` — async, await to completion. **Unchanged** (`await rlm(...)`
-  still works via `__call__`).
-- `X.send(*a, **kw) -> Handle` — **sync**; schedules a background task on the
-  kernel loop, returns a handle immediately. `send` is the single, general
-  background method for all tools (it subsumes the earlier `spawn`/`send` split —
-  "you send data to a tool, then poll it at will").
-  - For `rlm`: `rlm.send(prompt, name=None)` is named, persistent, multi-turn
-    (see below). The `name`/persistence kwargs are rlm-specific.
-  - For a skill: `skill.send(**skill_kwargs)` runs it in the background; no name
-    or persistence required.
+- `X.run(*a, **kw)` — async; await to completion; returns the **bare return
+  value** (unchanged — `await rlm(...)` still works via `__call__`). The simple
+  path has no wrapper.
+- `X.send(*a, **kw) -> Handle` — **sync**; enqueue input to a (possibly new)
+  background worker and return a handle immediately. The single background
+  method for all tools. rlm-specific kwargs: `name` (persistence / continuation;
+  `None` → auto-generated, e.g. `beautiful-sky-bison`).
 
 **Handle:**
 
-- `.poll() -> (status, payload)` — **sync**; non-blocking status check.
-- `.wait() -> <result>` — async; await the final result of this handle.
-- `.dismiss()` — request teardown (cancel task, shut down sub-kernel, finalize
-  session). Sync request; teardown runs in the background.
+- `.poll() -> ToolState` — **sync**; a snapshot of dynamic state (below). Pure
+  read — never mutates or consumes.
+- `.wait() -> <result>` — async; await the next result.
+- `.dismiss()` — graceful teardown (drain/cancel, finalize session, shut
+  sub-kernel). Sync request; teardown runs in the background.
+- `.session_dir` — for `rlm`, the agent's session dir; `session_dir/"messages.jsonl"`
+  is the live transcript the model can read/tail (this is "message history = the
+  path"). `None` for tools without a transcript.
 
-**`rlm.send` persistence (named, multi-turn):**
+**Registry:** `rlm.get(name) -> Handle | None`, `rlm.list() -> list[str]` — so
+the model can poll by name in a later cell without keeping the handle var.
 
-- `name=None` → auto-generated name (e.g. `beautiful-sky-bison`).
-- First call with a name: create + setup + run one turn.
-- Subsequent calls with the same name: append a user turn to the *same* engine
-  (same conversation, same live kernel) and run again — the parent holds a
-  multi-turn conversation with a persistent specialist.
-- `rlm.get(name) -> Handle | None`, `rlm.list() -> list[str]` — registry access,
-  so the model can poll by name in a later cell without keeping the handle var.
+**The uniform poll object** (`ToolState` — working name; the "messages object"):
 
-**Status contract** (`poll`): returns **real Python objects**, not stringified
-ones — poll results are *not* auto-injected into the model's context. The model
-writes `x = handle.poll()` and decides what to do (briefly print it, re-raise an
-exception, format a traceback, drive control flow). Only what the model prints
-(stdout/stderr) reaches its context, so handles can return whatever is most
-expressive:
+- `status` — worker lifecycle: `running` / `finished` (idle) / `error`. Your
+  `("running", <queue>)` lives here as `status == "running"` + `queued`.
+- `results` — a **FIFO of the tool's own return values**, drained by the model
+  (`results.popleft()` / iterate). **`poll()` never consumes** — a status-check
+  poll must not silently eat a result. One item for a one-shot skill; one per
+  completed turn for multi-turn rlm. For `rlm` the items are `RLMResult`
+  (`.answer`, `.session_dir`).
+- `queued` — the **live, directly-editable** pending inbox (a list): cancel,
+  reorder, or edit not-yet-started items. Race-free because the kernel loop is
+  single-threaded cooperative (a sync edit in a cell can't interleave with the
+  drain coroutine, which only yields at `await`). The in-flight turn has already
+  left the list.
+- `error` — the **live exception object** if the worker died (`None` otherwise);
+  the model can print it, re-raise, or format a traceback.
 
-- `("running", None)`
-- `("finished", <result>)` — the underlying callable's actual return value. For
-  `rlm` that's the `RLMResult` (`.answer` for the text); after a follow-up
-  `send(name)` the status flips back to `running` until that turn ends.
-- `("error", <Exception>)` — the **live exception object** (the model can print
-  it, re-raise it, or pull a full traceback). More general and more expressive
-  than a pre-stringified message, and it costs nothing since poll output isn't
-  auto-shown. The same generality applies to all tools — poll returns real
-  values; the model chooses what to surface.
+`status` and `results` are independent: `finished` with unread results buffered,
+or `error` with one good result already in the FIFO, are both valid (an errored
+turn halts the worker, as the engine does today).
 
-**Sync vs async shape is load-bearing:** `send`/`poll`/`get`/`list`/`dismiss`
-are sync so cells read naturally (`h = rlm.send(...)` returns immediately);
-`run`/`wait` are async (await to completion).
+**Sync vs async:** `send`/`poll`/`get`/`list`/`dismiss` are sync (`h = rlm.send(...)`
+returns immediately); `run`/`wait` are async.
 
-### 3.2 Registry + handle (kernel-side, no engine change)
+**Discoverability:** signature + docstring are mirrored onto the wrapped callable
+(as `_wrap_callable` already does for `run` via `__signature__`/`__doc__`), so
+`help(rlm)` / `inspect.signature` surface `send`/`poll`/etc. A strong docstring +
+system-prompt line carry the "`send` to a stateless skill = one background call;
+`send` to a named rlm = continue the conversation" distinction.
 
-Ship a small helper module in the `rlm` package (e.g. `rlm/_async_runtime.py`)
-imported by `_inject_startup` — **not** inlined into the `setup_code` f-string
-(testable, maintainable).
+### 3.2 Worker + registry + handle (kernel-side)
 
-- A module-level **registry**: `name -> Handle`. Holds **strong refs** to tasks
-  (asyncio won't otherwise keep them alive) and survives across cells via the
-  kernel namespace.
-- A **`Handle`** wraps an `asyncio.Task`; an `add_done_callback` stores the
-  result/exception so `poll` is non-blocking and unretrieved-exception warnings
-  ("Task exception was never retrieved") don't spam logs.
-- `send` schedules the coroutine with `asyncio.ensure_future` on the running loop
-  and registers the handle.
+Ship a helper module `rlm/_async_runtime.py`, imported by `_inject_startup` —
+**not** inlined into the `setup_code` f-string (testable, maintainable).
 
-This layer alone delivers offloading for skills and one-off background `rlm`.
+- A **worker** per name owns an inbox (deque) and drains it **sequentially** as
+  one asyncio task on the kernel loop. Generic and tool-agnostic.
+- A **processor** parameterizes "process one queued item" — this is how
+  "continuation is up to the tool":
+  - default (stateless): `await tool.run(item)`, push the return value to
+    `results`.
+  - `rlm` (stateful): `await engine.advance(prompt)` on a live engine (§3.3).
+- A **Handle** wraps the worker; `poll()` builds a `ToolState` from worker state;
+  the drain loop stores each result/exception so nothing becomes an
+  unretrieved-exception warning.
+- A module-level **registry** (per kernel) holds workers by name with **strong
+  refs** (asyncio won't keep tasks alive otherwise). Per-kernel ⇒ hierarchical:
+  each agent owns the registry of the children *it* spawned; nesting is
+  naturally recursive, no global registry.
 
-### 3.3 Resumable engine (engine-side) — required for persistence
+This layer alone (with the default stateless processor) delivers offloading +
+queueing for skills.
 
-Refactor `RLMEngine` so a named agent can be kept alive and continued:
+### 3.3 Resumable engine (rlm's stateful processor)
 
-- Split `run()` into:
+- Split `RLMEngine.run()` into:
   - `setup()` — depth check, ensure session, write meta, start REPL, build
     system prompt + initial `messages`.
   - `advance(prompt) -> RLMResult` — append `{"role":"user","content":prompt}`,
-    run the loop to the next stop, return the answer. Callable repeatedly.
-- **Defer REPL teardown.** Today `run()` shuts the REPL down in `finally`; for
-  persistent agents the kernel must stay alive until `dismiss()` (or parent
-  teardown). Keep the one-shot `run()` = `setup()` + one `advance()` + teardown
-  for the unchanged blocking path.
-- `rlm.send(name)` routes to: look up engine for `name` in the registry; create
-  + `setup()` if absent; schedule `advance(prompt)` in the background.
+    run the loop to the next stop, return the result. Callable repeatedly.
+  - `run()` stays = `setup()` + one `advance()` + teardown (unchanged blocking
+    path).
+- **Defer REPL teardown** for persistent agents until `dismiss()` / cascade.
+- rlm's processor = `advance` on the live engine; a reused `name` = the same
+  engine = a multi-turn conversation with a persistent specialist.
+- **Forward-compat (Phase 2):** keep the model-completion call centralized in
+  the loop (a single `await self._completion(...)` site) so interruptions can
+  wrap *that* call later without reworking the loop.
 
-**Forward-compat note (for Phase 2):** keep the model-completion call
-centralized in the loop (a single `await self._completion(...)` site) so
-interruptions can later wrap *that* call without reworking the loop. Do not
-scatter `chat.completions.create` calls.
+### 3.4 Queueing (Phase 1)
 
-### 3.4 Session layout
+- `send` to a busy name **enqueues**; the worker drains sequentially after the
+  current turn completes — **no preemption** (preempting the in-flight turn is
+  Phase 2).
+- `poll().status` stays `running` while draining; `poll().queued` exposes depth
+  and is directly editable.
+- Each queued item's result lands in `results` in order.
+- The "send to a stateless tool twice" case is just a 2-item queue processed
+  serially (two independent `run`s).
 
-Use the agent name in the session path so persistence is durable and
-debuggable. The dirs **nest along the call tree** — a sub-agent of a sub-agent
-nests one level deeper — mirroring the live registry structure:
+### 3.5 Session layout
+
+Agent name in the session path; dirs **nest along the call tree** (sub-of-sub
+one level deeper), mirroring the per-kernel registries:
 
 ```
 <root-session>/<agent-name>/messages.jsonl
 <root-session>/<agent-name>/<sub-agent-name>/messages.jsonl   # sub-of-sub
 ```
 
-- **Two parallel structures, both needed.** The live IPython state (engines +
-  kernels) is held in an in-memory **registry dict per kernel** — each agent owns
-  the registry of the children *it* spawned, so nesting is naturally recursive
-  and needs no global registry. The dict is required for liveness regardless; the
-  **nested dirs** are the durable, inspectable mirror that makes rollouts
-  interpretable after the fact and lets the parent model find and act on a
-  child's transcript if it ever needs to.
-- Names are unique **within a parent** (per-kernel registry), not globally —
-  `root/specialist` and `root/other/specialist` can coexist. Names must be
-  filesystem-safe and collision-checked (auto-names too).
+- **Two parallel structures.** Live IPython state (engines + kernels) lives in
+  the in-memory per-kernel registry; the **nested dirs** are the durable,
+  inspectable mirror. The transcript is reachable as
+  `handle.session_dir/"messages.jsonl"` (live-tailable) and via each result's
+  `RLMResult.session_dir`.
+- Names are unique **within a parent** (per-kernel), not globally —
+  `root/specialist` and `root/other/specialist` coexist. Filesystem-safe,
+  collision-checked (auto-names too).
 - Update the two `sub-*` globs that assume the random-id prefix:
-  `engine.py:_detect_new_children` and `session.py:aggregate_child_metrics`
-  (broaden the glob or keep a `sub-`/marker convention).
-- `messages.jsonl` is the **durable record** (and a future rehydration path); the
-  **live engine in the registry is the actual persistence** (the on-disk log
-  cannot restore live kernel variables — only the conversation).
+  `engine.py:_detect_new_children` and `session.py:aggregate_child_metrics`.
 
-### 3.5 Token budget (token only for Phase 1)
+### 3.6 Token budget (token only for Phase 1)
 
 - Reuse the existing budget (`RLM_MAX_TOKENS` → `stop_reason="token_budget"`,
-  checked per turn in `_run_loop`).
-- Add a per-`send` `max_tokens` kwarg, **clamped to a user-set env ceiling**:
-  `effective = min(model_requested or ceiling, ceiling)` — same clamp idiom as
-  the existing timeout caps. Proposed env: `RLM_SUB_MAX_TOKENS`.
-- Wall-clock/time budgets are **deferred**.
+  per-turn check in `_run_loop`).
+- Per-`send` `max_tokens` kwarg, **clamped to a user-set env ceiling**:
+  `effective = min(model_requested or ceiling, ceiling)` (same clamp idiom as the
+  timeout caps). Env: `RLM_SUB_MAX_TOKENS`.
+- Wall-clock/time budgets **deferred**.
 
-### 3.6 Lifecycle, teardown, caps
+### 3.7 Lifecycle, teardown, caps (in this PR)
 
-- **Cap** concurrent/persistent agents (proposed env, e.g.
-  `RLM_MAX_LIVE_AGENTS`) — each persistent `rlm` with ipython enabled is another
-  kernel subprocess + thread + session.
-- **Teardown is the sharpest operational risk.** When the parent engine shuts
-  down its own REPL, named sub-agents living in the kernel namespace are **not**
-  auto-killed (separate subprocesses + tasks). The registry must expose a
-  "close all" run on kernel shutdown (atexit / shutdown hook): cancel tasks, shut
-  sub-REPLs, finalize sessions.
-- **Metrics at parent finalize:** `aggregate_child_metrics` already tolerates a
-  child missing `context_token_stats` (treats as zero), so a still-running agent
-  won't crash aggregation — but for accurate sub-rlm token counts, persistent
-  agents should be drained/finalized before the parent finalizes.
+- **Graceful-dismiss cascade.** `dismiss` (and parent teardown) must drain/cancel
+  → finalize the session → *then* shut the sub-kernel. A hard
+  `shutdown_kernel(now=True)` on a parent **orphans descendants' kernels**, so
+  teardown recurses gracefully (each level closes its registry before its kernel
+  dies). This also fixes an ordering bug: today `session.finalize()` (→
+  `aggregate_child_metrics`) runs at the end of `_run_loop`, *before*
+  `repl.shutdown()` in `run()`'s `finally`, so live children under-count.
+  New order: **drain live agents → parent finalize → kill kernel.**
+- **Global cap via marker files** (crash-safe). A directory of one-file-per-live-
+  agent (named with owning PID + agent path) under the root session; an `flock`
+  around the atomic check-and-create; a stale-marker sweep (drop dead PIDs) on
+  each create. At cap, `send` returns a handle already in a terminal
+  capacity/`error` state (uniform — the model polls it like any other). An
+  integer counter would leak on hard-kill; counting live marker files + PID-sweep
+  does not. Env: `RLM_MAX_LIVE_AGENTS`.
 
-### 3.7 Verifiers harness ripples
+### 3.8 Open questions (Phase 1)
+
+- `ToolState` class name (you've been calling it the "messages object").
+- Capacity-rejection shape: terminal-`error` handle (uniform poll) vs. raise.
+- Auto-name seeding: deterministic per rollout (counter / seed from session id)
+  vs. random — recommend deterministic for reproducibility.
+
+### 3.9 Verifiers harness ripples (PR 2)
 
 - New env vars (`RLM_SUB_MAX_TOKENS`, `RLM_MAX_LIVE_AGENTS`) wire into both
   integrations: v1 `RLMProgramConfig` (`packages/harnesses/harnesses/rlm.py`)
@@ -237,15 +264,6 @@ nests one level deeper — mirroring the live registry structure:
   (`verifiers/envs/experimental/composable/harnesses/rlm.py`).
 - **No change** to the interception or `meta.json` metrics contracts. Background
   sub-agents still tag `X-RLM-Depth >= 1` and stay black-box.
-
-### 3.8 Open questions (Phase 1)
-
-- **`send(name)` while that agent is still running** — error/busy, queue, or
-  ignore? Queueing previews interruptions; recommend **error/busy for Phase 1**
-  (simplest, no preemption semantics yet).
-- Exact env var names (`RLM_SUB_MAX_TOKENS`, `RLM_MAX_LIVE_AGENTS`).
-- Auto-name generator seeding: deterministic per rollout (counter / seed from
-  session id) vs. random — recommend deterministic for reproducibility.
 
 ---
 
@@ -274,10 +292,10 @@ tool exec, queue it and apply after the tool result is appended.
   tails — precedent: `programmatic_tool_calls.jsonl` is already a
   kernel/bash→engine file signal. (Accepts poll-interval latency; a socket would
   be lower-latency but more moving parts.)
-- **Keep the partial response, but actually stop generation.** This requires
-  streaming + abort, and must also **stop vLLM-side generation** (not just drop
-  the client request). This is the main complexity/risk and the reason Phase 2
-  is deferred.
+- **Keep the partial response, but actually stop generation.** Requires
+  streaming + abort, and must **stop vLLM-side generation** (not just drop the
+  client request). This is the main complexity/risk and the reason Phase 2 is
+  deferred.
 - **It is a branch event, like compaction.** Injecting mid-thinking rewrites the
   branch; reuse the harness `render_completion_with_branches` machinery. Mind
   **role-ordering** of the injected message (chat-template alternation matters in
@@ -290,28 +308,31 @@ tool exec, queue it and apply after the tool result is appended.
 
 ### Synergy with Phase 1
 
-With async tool calling, the model writes **short** poll cells instead of long
-blocking ones, so interrupts can land promptly at thinking boundaries. The
-flagship "sub-agent notifies parent when done" case = Phase-1 background task +
-Phase-2 done-callback writing the channel.
+With async tool calling the model writes **short** poll cells instead of long
+blocking ones, so interrupts land promptly at thinking boundaries. The flagship
+"sub-agent notifies parent when done" case = Phase-1 background task + Phase-2
+done-callback writing the channel.
 
 ---
 
 ## 5. Work split / milestones
 
-- **M0 — Probe.** Verify a backgrounded task progresses between cells under the
-  pinned ipykernel/nest_asyncio. ~20 lines. Gate for everything else.
-- **M1 — Generic background handle.** `send`/`poll`/`wait`/`dismiss` + registry
-  in `rlm/_async_runtime.py`, wired into `_inject_startup`. No engine change, no
-  persistence. Delivers offloading for skills and one-off background `rlm`.
-- **M2 — Resumable engine + named persistence.** Split `RLMEngine.run()` into
-  `setup()`/`advance()`; defer REPL teardown; `rlm.send`/`get`/`list`; session
-  namespacing by agent name.
-- **M3 — Budget + lifecycle.** Per-`send` token budget clamped to env ceiling;
-  concurrent-agent cap; kernel-shutdown teardown of live agents.
-- **M4 — Harness wiring.** New env vars into v1 `RLMProgramConfig` and composable
-  `rlm_harness`.
-- **(Later) Phase 2 — interruptions.**
+- **M0 — Probe. DONE.** Backgrounded task progresses between cells (verified).
+- **`display_data` capture — DONE** (branch `fix/ipython-capture-display-data`,
+  its own PR).
+- **PR 1 — persistent tools** (this branch). Collapses old M1+M2+M3, since
+  they're too entangled to split:
+  - `rlm/_async_runtime.py`: worker + processor + `Handle` + per-kernel registry
+    + `ToolState`.
+  - Queueing (per-name inbox, sequential drain, editable `queued`).
+  - Resumable engine (`setup`/`advance`), rlm stateful processor.
+  - `rlm.send` / `rlm.get` / `rlm.list`; wired into `_inject_startup`.
+  - Graceful-dismiss cascade + finalize/shutdown re-ordering.
+  - Marker-file global cap (`RLM_MAX_LIVE_AGENTS`).
+  - Session-path transcript access (`handle.session_dir`).
+- **PR 2 — harness wiring.** New env vars into v1 `RLMProgramConfig` and
+  composable `rlm_harness`.
+- **Later — Phase 2 interruptions.**
 
 ## 6. Non-goals (Phase 1)
 
