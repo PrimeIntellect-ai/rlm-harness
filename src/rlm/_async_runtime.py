@@ -315,6 +315,27 @@ class Registry:
                 pass
 
 
+def attach_background(module, run_callable, *, name_seed: str = ""):
+    """Give a wrapped callable module a stateless ``.send(*a, **kw) -> Handle``.
+
+    ``send`` runs ``run_callable(*a, **kw)`` on a background worker (auto-named,
+    no persistence, no live-agent cap — skills are cheap coroutines, not
+    kernels). The model holds the returned handle and polls it. Used to give
+    uploaded skills the same background/poll lifecycle as sub-agents.
+    """
+    registry = Registry(name_seed=name_seed)
+
+    def send(*args, **kwargs):
+        return registry.send(
+            (args, kwargs),
+            name=None,
+            processor_factory=lambda _name: FnProcessor(run_callable),
+        )
+
+    module.send = send
+    return module
+
+
 _NAME_ADJECTIVES = (
     "amber",
     "brave",

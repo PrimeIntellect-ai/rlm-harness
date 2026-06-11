@@ -217,8 +217,11 @@ def _wrap_callable(mod, log_source):
     return wrapped
 
 
+from rlm._async_runtime import attach_background as _attach_background
 for _name in {installed_skills!r}:
-    globals()[_name] = _wrap_callable(__import__(_name), 'python')
+    _skill = _wrap_callable(__import__(_name), 'python')
+    _attach_background(_skill, _skill.run, name_seed=os.environ.get('RLM_SESSION_DIR', ''))
+    globals()[_name] = _skill
 
 if {allow_recursion!r}:
     globals()['rlm'] = _wrap_callable(__import__('rlm'), None)

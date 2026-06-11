@@ -161,3 +161,20 @@ def test_auto_name_is_deterministic():
     assert _auto_name(0, seed="s") == _auto_name(0, seed="s")
     name = _auto_name(0, seed="s")
     assert name.count("-") == 2
+
+
+async def test_attach_background_adds_send():
+    import types
+
+    from rlm._async_runtime import attach_background
+
+    mod = types.ModuleType("fakeskill")
+
+    async def run(x, *, plus=1):
+        return x + plus
+
+    mod.run = run
+    attach_background(mod, mod.run)
+
+    assert await mod.send(41).wait() == 42  # forwards positional args
+    assert await mod.send(10, plus=5).wait() == 15  # forwards kwargs

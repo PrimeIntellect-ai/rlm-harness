@@ -108,6 +108,11 @@ def build_system_prompt(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "
             "Discover its CLI usage with `<skill> --help`."
         )
+        skill_lines.append(
+            "To offload a slow skill call, run it in the background: "
+            "`handle = <skill>.send(...)`, then check `handle.poll()` later "
+            "(same handle API as sub-agents)."
+        )
     if skill_lines:
         parts.extend(["", *skill_lines])
 
