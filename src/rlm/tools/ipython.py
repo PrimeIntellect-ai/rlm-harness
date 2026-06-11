@@ -153,6 +153,7 @@ class IPythonREPL:
     def _inject_startup(self):
         """Set up kernel: cwd, env vars, nest_asyncio, skill pre-imports."""
         session_dir = str(self.session.dir) if self.session else None
+        live_agents_dir = os.environ.get("RLM_LIVE_AGENTS_DIR", "")
         depth = int(os.environ.get("RLM_DEPTH", "0"))
         max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         allow_recursion = depth < max_depth
@@ -163,6 +164,7 @@ import os, sys, types, json, time, functools, inspect
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
+os.environ['RLM_LIVE_AGENTS_DIR'] = {live_agents_dir!r}
 
 import nest_asyncio
 nest_asyncio.apply()

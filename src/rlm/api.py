@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 
+from rlm._agent_limit import AgentLimitReached, acquire_slot, release_slot
 from rlm._async_runtime import Handle, Registry, close_all_registries
 from rlm.engine import RLMEngine
 from rlm.session import Session
@@ -46,9 +47,10 @@ class _RlmProcessor:
     a turn to the same engine (a multi-turn conversation).
     """
 
-    def __init__(self, session: Session | None, engine_kwargs: dict):
+    def __init__(self, session: Session | None, engine_kwargs: dict, marker=None):
         self._session = session
         self._engine_kwargs = engine_kwargs
+        self._marker = marker
         self._engine: RLMEngine | None = None
 
     async def process(self, prompt: str) -> RLMResult:
@@ -61,8 +63,11 @@ class _RlmProcessor:
         return await self._engine.advance(prompt)
 
     async def teardown(self) -> None:
-        if self._engine is not None:
-            await self._engine.aclose()
+        try:
+            if self._engine is not None:
+                await self._engine.aclose()
+        finally:
+            release_slot(self._marker)
 
 
 def send(
@@ -89,6 +94,19 @@ def send(
     if max_tokens is not None:
         engine_kwargs.setdefault("max_tokens", max_tokens)
 
+    # Reserve a live-agent slot for a *new* agent (continuation reuses its slot).
+    # At capacity, raise rather than silently spawning — distinct from a runtime
+    # failure surfaced via poll().error.
+    is_new = name is None or _REGISTRY.get(name) is None
+    marker = None
+    if is_new:
+        granted, marker = acquire_slot()
+        if not granted:
+            raise AgentLimitReached(
+                "live sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
+                "dismiss an agent before starting another"
+            )
+
     holder: dict[str, Session | None] = {}
 
     def session_dir_factory(agent_name: str):
@@ -97,7 +115,7 @@ def send(
         return session.dir if session is not None else None
 
     def processor_factory(agent_name: str) -> _RlmProcessor:
-        return _RlmProcessor(holder.get("session"), engine_kwargs)
+        return _RlmProcessor(holder.get("session"), engine_kwargs, marker=marker)
 
     return _REGISTRY.send(
         prompt,

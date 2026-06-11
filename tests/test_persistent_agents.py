@@ -5,9 +5,11 @@ Driven with a scripted DummyClient and RLM_TOOLS="" so no sub-kernel starts.
 
 import asyncio
 
+import pytest
 from conftest import DummyClient, DummyMessage
 
 from rlm._async_runtime import FINISHED
+from rlm._agent_limit import AgentLimitReached
 
 
 async def _settle(handle, *, want=FINISHED, tries=400):
@@ -68,3 +70,33 @@ def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
     assert RLMEngine().max_tokens == 100
     monkeypatch.delenv("RLM_MAX_TOKENS", raising=False)
     assert RLMEngine().max_tokens is None
+
+
+async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
+    from rlm import api
+
+    h1 = api.send(
+        "task a",
+        name="a",
+        client=DummyClient([DummyMessage(content="a1"), DummyMessage(content="a2")]),
+    )
+    # a second *distinct* agent exceeds the cap of 1
+    with pytest.raises(AgentLimitReached):
+        api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
+
+    # continuing the same agent needs no new slot
+    api.send("more a", name="a")  # no raise
+
+    # freeing the slot lets a new agent start
+    h1.dismiss()
+    await asyncio.sleep(0.05)
+    h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
+    assert (await h2.wait()).answer == "b1"
+    h2.dismiss()
+    await asyncio.sleep(0.05)

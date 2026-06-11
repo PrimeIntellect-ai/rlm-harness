@@ -236,6 +236,12 @@ class RLMEngine:
             return
 
         self._ensure_session()
+        if self.depth == 0 and os.environ.get("RLM_MAX_LIVE_AGENTS"):
+            # Root derives the shared live-agent marker dir; it propagates to
+            # every kernel (via _inject_startup) so the cap is tree-global.
+            os.environ.setdefault(
+                "RLM_LIVE_AGENTS_DIR", str(self.session.dir / ".live_agents")
+            )
         self.session.write_meta(
             session_id=self.session.dir.name,
             model=self.model,

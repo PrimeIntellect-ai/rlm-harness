@@ -244,18 +244,19 @@ one level deeper), mirroring the per-kernel registries:
   `aggregate_child_metrics`) runs at the end of `_run_loop`, *before*
   `repl.shutdown()` in `run()`'s `finally`, so live children under-count.
   New order: **drain live agents → parent finalize → kill kernel.**
-- **Global cap via marker files** (crash-safe). A directory of one-file-per-live-
-  agent (named with owning PID + agent path) under the root session; an `flock`
-  around the atomic check-and-create; a stale-marker sweep (drop dead PIDs) on
-  each create. At cap, `send` returns a handle already in a terminal
-  capacity/`error` state (uniform — the model polls it like any other). An
-  integer counter would leak on hard-kill; counting live marker files + PID-sweep
-  does not. Env: `RLM_MAX_LIVE_AGENTS`.
+- **Global cap via marker files** (crash-safe). One marker file per live agent
+  (`<pid>-<uuid>.marker`) in a per-rollout dir shared by the whole process tree:
+  the root derives `RLM_LIVE_AGENTS_DIR` from its session and it propagates to
+  every kernel via `_inject_startup`. An `flock` serializes sweep-count-create; a
+  PID-liveness sweep on each acquire reclaims slots leaked by hard-killed
+  processes (an integer counter could not). At cap, `send` **raises**
+  `AgentLimitReached` — a creation-time failure, uniform across tools (any tool's
+  `send` raises it) and distinct from the `poll().error` runtime channel; this
+  supersedes the earlier "terminal handle" sketch. Env: `RLM_MAX_LIVE_AGENTS`.
 
 ### 3.8 Open questions (Phase 1)
 
 - `ToolState` class name (you've been calling it the "messages object").
-- Capacity-rejection shape: terminal-`error` handle (uniform poll) vs. raise.
 - Auto-name seeding: deterministic per rollout (counter / seed from session id)
   vs. random — recommend deterministic for reproducibility.
 
