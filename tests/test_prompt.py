@@ -77,12 +77,14 @@ def test_edit_skill_prompt_included_when_edit_is_installed():
     prompt = _prompt([_Tool("ipython")], installed_skills=["edit"])
 
     assert EDIT_SKILL_PROMPT in prompt
-    assert 'await edit(path="relative/file.py"' in prompt
+    assert 'await edit(path="relative/file.py", old_str=old, new_str=new)' in prompt
     assert "pre-imported `edit` skill from IPython" in prompt
     assert "`old_str` must appear exactly once" in prompt
     assert "do not use `file`, `old`, `new`, line numbers" in prompt
     assert "inspect the file and retry with a smaller exact snippet" in prompt
     assert "Only use normal Python file I/O for creating new files" in prompt
+    assert 'Do not wrap text that contains `"""`' in prompt
+    assert "use triple single quotes" in prompt
     assert "Good targeted edit pattern" in prompt
 
 
