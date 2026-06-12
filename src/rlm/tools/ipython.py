@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import copy
 import os
-from queue import Empty
 import re
 import sys
 import threading
 import time
+from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
@@ -30,7 +30,10 @@ IPYTHON_SCHEMA = {
             "Use !command for shell commands (e.g. !ls -la, !cat file.py, !pip install foo). "
             "Use !python3 to run code with the project's own packages "
             "(e.g. !python3 -m pytest, !python3 -c 'import numpy'). "
-            "Use %%bash for multi-line shell scripts."
+            "Use %%bash for multi-line shell scripts. If code contains %%bash, "
+            "the code string must begin exactly with %%bash followed by a "
+            "newline. Do not put a blank line, spaces, comments, imports, or "
+            "Python code before %%bash."
         ),
         "parameters": {
             "type": "object",
@@ -65,8 +68,7 @@ class IpythonTool:
         )
         schema = copy.deepcopy(IPYTHON_SCHEMA)
         schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
-            "Optional timeout in seconds. "
-            f"Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
+            f"Optional timeout in seconds. Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
         )
         return schema
 
