@@ -193,6 +193,10 @@ queueing for skills.
 - **Defer REPL teardown** for persistent agents until the end-of-rollout cascade.
 - rlm's processor = `advance` on the live engine; a reused `name` = the same
   engine = a multi-turn conversation with a persistent specialist.
+- **Resume:** when an on-disk session exists but the in-memory engine is gone
+  (post kernel-restart), `setup()` rehydrates `_messages` from the latest view in
+  `sub-<name>/messages.jsonl` and the header from `meta.json` instead of seeding
+  fresh — see §3.10.
 - **Forward-compat (Phase 2):** keep the model-completion call centralized in
   the loop (a single `await self._completion(...)` site) so interruptions can
   wrap *that* call later without reworking the loop.
@@ -222,7 +226,8 @@ one level deeper), mirroring the per-kernel registries:
   the in-memory per-kernel registry; the **nested dirs** are the durable,
   inspectable mirror. The transcript is reachable as
   `handle.session_dir/"messages.jsonl"` (live-tailable) and via each result's
-  `RLMResult.session_dir`.
+  `RLMResult.session_dir`. `messages.jsonl` is the append-only list of views the
+  engine rehydrates from after a restart (§3.10).
 - Names are unique **within a parent** (per-kernel), not globally —
   `root/specialist` and `root/other/specialist` coexist. Model-supplied names are
   sanitized filesystem-safe; an omitted name auto-generates a uuid hex.
@@ -279,12 +284,70 @@ one level deeper), mirroring the per-kernel registries:
 
 ### 3.9 Verifiers harness ripples (PR 2)
 
-- New env vars (`RLM_SUB_MAX_TOKENS`, `RLM_MAX_LIVE_AGENTS`) wire into both
+- New env vars (`RLM_SUB_MAX_TOKENS`, `RLM_MAX_LIVE_AGENTS`,
+  `RLM_MAX_RUNNING_AGENTS`, `RLM_AGENT_WAIT_TIMEOUT`) wire into both
   integrations: v1 `RLMProgramConfig` (`packages/harnesses/harnesses/rlm.py`)
   and legacy `rlm_harness(...)`
   (`verifiers/envs/experimental/composable/harnesses/rlm.py`).
 - **No change** to the interception or `meta.json` metrics contracts. Background
   sub-agents still tag `X-RLM-Depth >= 1` and stay black-box.
+
+### 3.10 Restart resilience: resume-from-disk + kernel-reset warning (this PR)
+
+A timed-out cell an interrupt can't clear triggers `IPythonREPL.restart_kernel`,
+which restarts the kernel *process* and re-runs `_inject_startup` — wiping the
+kernel's Python state, including `rlm.api._REGISTRY` and every named sub-agent's
+in-memory engine (the `RLMEngine` objects live in the *parent* kernel's process,
+not in the sub-agents' own kernels). Two consequences, two fixes.
+
+**Resume-from-disk (parent-kernel restart).** Afterward `_REGISTRY` is empty but
+the `sub-<name>/` dirs persist. Re-sending a name must *continue* that agent, not
+silently start fresh and append onto its old transcript. So when `send(name=X)`
+builds a worker, no in-memory engine exists, but `sub-X/messages.jsonl` does,
+`setup()` rehydrates from disk instead of seeding `[system, user]`. This makes
+re-sending a name a true continuation across restarts — which is exactly why the
+`exist_ok=True` append is *correct* (one agent, one growing transcript) and why no
+dir disambiguation is needed.
+
+**Kernel-reset warning (any restart).** A restart wipes the agent's REPL
+variables/imports even when its conversation survives (own-kernel restart:
+conversation intact in the engine; parent-kernel restart: conversation rehydrated,
+fresh REPL). `IPythonREPL` records that it restarted; the engine injects a
+`WARNING: kernel reset — variables and imports are gone; rebuild any state you
+need` turn into `_messages` before the next completion. Universal — the root agent
+gets it too.
+
+**Transcript = append-only list of views (supersedes the old event log).**
+`messages.jsonl` becomes the replayable structure rather than a lossy log:
+- A **view** is the message sequence the model saw within one compaction branch.
+  Append each turn to the current view; on compaction, append the checkpoint user
+  prompt + the assistant summary to the closing view, then open a new view seeded
+  with `[system, user(framing+summary)]` and keep appending.
+- Append-only typed lines: message lines (tagged with view index + turn, full
+  OpenAI shape incl. `tool_call_id`s), `branch_reset` lines (compaction stats:
+  dropped/summary chars, turns-since), event lines (`sub_spawn`, `done`).
+- **Resume loads the latest view** (`views[-1]`); keep all prior views — each is a
+  contiguous context the model acted in (the training-native shape).
+- rlm-local: nothing outside rlm reads `messages.jsonl` (verified — not prime-rl,
+  not verifiers). Same filename, so the system-prompt path, model tailing, and
+  `handle.session_dir` are unchanged.
+
+**Resume header in `meta.json`, written per turn.** Usage / metrics /
+`turn_offset` restore on resume. `meta.json` already holds usage+metrics — write
+it per turn (not only at `finalize`) so a hard restart, which never calls
+`finalize`, doesn't undercount. Matters because those metrics feed the harness
+metric channel (`rlm_total_tool_response_tokens`, …) prime-rl consumes.
+
+**No train/inference mismatch.** The trainer builds samples from the inference
+engine's recorded token steps (`RolloutOutput.trajectory`), not `messages.jsonl`,
+and those tokens are exactly what was sent. A restart/resume — or the injected
+warning, which is an append — at worst starts a new training-sample split, the
+same thing compaction already does and which `interleave_rollout` handles
+gracefully. Storing the *exact* view (vs. reconstructing) is what keeps the
+resumed agent's continuation correct.
+
+**Sequence:** kernel-reset warning first (small, self-contained, helps every agent
+today), then resume-from-disk.
 
 ---
 
@@ -353,6 +416,8 @@ done-callback writing the channel.
   - Marker-file caps: total resident (`RLM_MAX_LIVE_AGENTS`) + running
     parallelism (`RLM_MAX_RUNNING_AGENTS`), with eager reap on error.
   - Session-path transcript access (`handle.session_dir`).
+  - Restart resilience (§3.10): `messages.jsonl` as an append-only list of views,
+    `setup()` resume-from-disk, per-turn `meta.json` header, kernel-reset warning.
 - **PR 2 — harness wiring.** New env vars into v1 `RLMProgramConfig` and
   composable `rlm_harness`.
 - **Later — Phase 2 interruptions.**
@@ -362,5 +427,3 @@ done-callback writing the channel.
 - Interruptions / mid-stream generation control / stopping vLLM generation.
 - Wall-clock/time budgets.
 - Determinism / virtual-time concurrency.
-- Rehydrating an agent from disk after teardown (the namespaced `messages.jsonl`
-  keeps the door open, but replay-persistence is not built in Phase 1).
