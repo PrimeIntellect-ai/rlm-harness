@@ -95,7 +95,7 @@ async def test_same_name_continues_one_worker():
     assert created == ["spec"]  # factory built once; the second send reused the worker
     await _settle(handle)
     assert list(handle.poll().results) == [4, 6]  # FIFO order
-    assert reg.list() == ["spec"]
+    assert list(reg._workers) == ["spec"]
 
 
 async def test_queued_is_editable():
@@ -151,7 +151,7 @@ async def test_close_all_tears_down_workers():
 async def test_auto_named_send_registers_a_worker():
     reg = Registry()
     handle = reg.send(4, name=None, processor_factory=lambda _n: _Doubler())
-    assert handle.name in reg.list()
+    assert reg.get(handle.name) is not None
     assert await handle.wait() == 8
 
 

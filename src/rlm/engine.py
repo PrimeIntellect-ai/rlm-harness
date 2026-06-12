@@ -274,12 +274,14 @@ class RLMEngine:
             self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
-        messages_path = str(self.session.dir / "messages.jsonl")
-        system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
         prior = self.session.load_latest_view()
         if prior:
             self._resume(prior)
         else:
+            messages_path = str(self.session.dir / "messages.jsonl")
+            system_prompt = self._load_system_prompt(
+                messages_path, active_builtin_tools
+            )
             self._messages = []
             self._view = 0
             self._record_message({"role": "system", "content": system_prompt}, turn=0)
@@ -315,7 +317,11 @@ class RLMEngine:
         conversation survived but the REPL is brand new.
         """
         self._messages = list(prior_messages)
-        header = self._read_resume_header()
+        meta_path = self.session.dir / "meta.json"
+        try:
+            header = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        except (OSError, json.JSONDecodeError):
+            header = {}
         self._view = header.get("view", 0)
         self._turn_offset = header.get("turn_offset", 0)
         usage = header.get("usage") or {}
@@ -332,15 +338,6 @@ class RLMEngine:
             {"role": "user", "content": KERNEL_RESET_RESUME_WARNING},
             turn=self._turn_offset,
         )
-
-    def _read_resume_header(self) -> dict:
-        meta_path = self.session.dir / "meta.json"
-        if not meta_path.exists():
-            return {}
-        try:
-            return json.loads(meta_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return {}
 
     async def advance(self, prompt: str) -> RLMResult:
         """Append a user turn and run the loop until the model stops calling tools.
@@ -553,13 +550,16 @@ class RLMEngine:
         self._setup_done = False
         try:
             if finalize:
-                # Drain background sub-agents living in this engine's kernel so
-                # their sessions finalize (and grandchildren cascade-close) before
-                # we aggregate child metrics and shut the kernel down. Best-effort:
-                # a wedged child must not block the parent from finalizing.
+                # Drain background sub-agents by running a cell in this engine's
+                # kernel (where their registries live) so each finalizes its
+                # session — and cascade-drains its own grandchildren — before we
+                # aggregate child metrics and shut the kernel down. Best-effort: a
+                # wedged child must not block the parent from finalizing.
                 if self._repl is not None and self.max_depth > 0:
                     try:
-                        self._drain_child_agents()
+                        self._repl.execute(
+                            "import rlm.api as _rlm; _rlm._drain_agents()", timeout=120
+                        )
                     except Exception:
                         pass
                 self.session.finalize(
@@ -575,15 +575,6 @@ class RLMEngine:
             if self._repl is not None:
                 self._repl.shutdown()
                 self._repl = None
-
-    def _drain_child_agents(self) -> None:
-        """Gracefully close background sub-agents in this engine's kernel.
-
-        Runs inside the kernel (where the agent registries live) so each child
-        finalizes its session — and recursively drains its own grandchildren —
-        before this engine aggregates child metrics and shuts the kernel down.
-        """
-        self._repl.execute("import rlm.api as _rlm; _rlm._drain_agents()", timeout=120)
 
     async def _compact_branch(
         self, messages: list[dict], turn: int, active_tools: list[dict]
@@ -692,7 +683,7 @@ class RLMEngine:
         current = {p.name for p in self.session.dir.glob("sub-*")}
         new = current - self._known_children
         for child_name in sorted(new):
-            self.session.log_spawn(child_name, "(spawned via rlm())")
+            self.session.log_spawn(child_name)
         self._known_children = current
 
     def _tool_context(self, messages: list[dict]) -> ToolContext:

@@ -81,16 +81,15 @@ class Session:
             }
         )
 
-    def log_spawn(self, child: str, command: str) -> None:
-        self._write({"t": "spawn", "child": child, "command": command})
+    def log_spawn(self, child: str) -> None:
+        self._write({"t": "spawn", "child": child})
 
     def load_latest_view(self) -> list[dict]:
         """Reconstruct the latest view (the engine's ``_messages``) from disk.
 
         Groups the append-only ``msg`` lines by ``view`` and returns the
         highest view's messages, in order — the exact context the model last
-        had. ``[]`` when there is no transcript yet. Used to resume a sub-agent
-        whose in-memory engine was lost to a kernel restart.
+        had. ``[]`` when there is no transcript yet.
         """
         path = self.dir / "messages.jsonl"
         if not path.exists():
@@ -169,8 +168,7 @@ class Session:
         """Create and return a child session directory under ``parent_dir``.
 
         With ``name`` the dir is ``sub-<sanitized-name>`` (stable across
-        re-sends, human-readable); otherwise a random ``sub-<id>``. The
-        ``sub-`` prefix keeps the existing ``sub-*`` discovery globs working.
+        re-sends, human-readable); otherwise a random ``sub-<id>``.
         """
         if name is not None:
             child = Path(parent_dir) / f"sub-{_sanitize_name(name)}"

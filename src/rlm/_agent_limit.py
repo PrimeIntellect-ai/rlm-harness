@@ -12,8 +12,7 @@ to each kernel). Two pools live in subdirectories under it:
 Each reserved slot owns one marker file named ``<pid>-<uuid>.marker``; a pool's
 live count is the number of its markers whose PID is still alive. An ``flock``
 serializes the sweep-count-create across processes, and a PID-liveness sweep
-reclaims slots leaked by hard-killed processes — which a plain integer counter
-could not.
+reclaims slots leaked by hard-killed processes.
 
 A pool's cap is active only when its env var is a positive int and a markers dir
 + POSIX ``fcntl`` are available; otherwise every acquire is granted. Assumes one
@@ -86,6 +85,13 @@ def _live_markers(markers_dir: Path) -> list[Path]:
     return live
 
 
+def _make_marker(markers_dir: Path) -> Path:
+    """Create and return one ``<pid>-<uuid>.marker`` file in ``markers_dir``."""
+    marker = markers_dir / f"{os.getpid()}-{uuid.uuid4().hex}.marker"
+    marker.write_text(str(os.getpid()))
+    return marker
+
+
 def acquire_slot(pool: str) -> tuple[bool, Path | None]:
     """Try to reserve a slot in ``pool`` (``TOTAL`` or ``RUNNING``).
 
@@ -103,9 +109,7 @@ def acquire_slot(pool: str) -> tuple[bool, Path | None]:
         try:
             if len(_live_markers(markers_dir)) >= limit:
                 return False, None
-            marker = markers_dir / f"{os.getpid()}-{uuid.uuid4().hex}.marker"
-            marker.write_text(str(os.getpid()))
-            return True, marker
+            return True, _make_marker(markers_dir)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -125,17 +129,6 @@ def _wait_timeout() -> float | None:
         return 300.0
     value = float(raw)
     return value if value > 0 else None  # 0 -> wait indefinitely
-
-
-def _force_acquire(pool: str) -> Path | None:
-    """Reserve a marker in ``pool`` ignoring the cap (timeout safety valve)."""
-    markers_dir = _markers_dir(pool)
-    if markers_dir is None or fcntl is None:
-        return None
-    markers_dir.mkdir(parents=True, exist_ok=True)
-    marker = markers_dir / f"{os.getpid()}-{uuid.uuid4().hex}.marker"
-    marker.write_text(str(os.getpid()))
-    return marker
 
 
 async def acquire_slot_blocking(pool: str) -> Path | None:
@@ -163,4 +156,8 @@ async def acquire_slot_blocking(pool: str) -> Path | None:
                 pool,
                 timeout,
             )
-            return _force_acquire(pool)
+            markers_dir = _markers_dir(pool)
+            if markers_dir is None or fcntl is None:
+                return None
+            markers_dir.mkdir(parents=True, exist_ok=True)
+            return _make_marker(markers_dir)

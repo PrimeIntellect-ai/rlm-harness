@@ -10,8 +10,6 @@ A worker owns an inbox and drains it sequentially via a :class:`Processor`:
 - the default stateless processor runs each item as an independent call;
 - ``rlm`` supplies a stateful processor (a live agent) so re-sending the same
   name continues a multi-turn conversation.
-
-This module is tool-agnostic: it knows nothing about ``rlm`` or the engine.
 """
 
 from __future__ import annotations
@@ -117,10 +115,6 @@ class BackgroundWorker:
     def status(self) -> str:
         return self._status
 
-    @property
-    def error(self) -> BaseException | None:
-        return self._error
-
     def state(self) -> ToolState:
         return ToolState(
             status=self._status,
@@ -130,10 +124,6 @@ class BackgroundWorker:
         )
 
     def submit(self, item: Any) -> None:
-        if self._status == ERROR:
-            raise RuntimeError(
-                f"worker {self.name!r} halted with an error; send to a different name"
-            )
         self.queued.append(item)
         self._status = RUNNING
         self._wake.set()
@@ -225,12 +215,7 @@ async def close_all_registries() -> None:
 
 
 class Registry:
-    """Per-tool, per-kernel collection of named workers.
-
-    Each agent owns the registry of the children *it* spawned (the module that
-    holds this instance lives in the kernel process), so nesting is naturally
-    hierarchical with no global registry.
-    """
+    """Per-tool, per-kernel collection of named workers."""
 
     def __init__(self):
         self._workers: dict[str, BackgroundWorker] = {}
@@ -239,9 +224,6 @@ class Registry:
     def get(self, name: str) -> Handle | None:
         worker = self._workers.get(name)
         return Handle(worker) if worker is not None else None
-
-    def list(self) -> list[str]:
-        return sorted(self._workers)
 
     def send(
         self,
