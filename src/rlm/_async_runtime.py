@@ -17,7 +17,7 @@ This module is tool-agnostic: it knows nothing about ``rlm`` or the engine.
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import uuid
 import weakref
 from collections import deque
 from dataclasses import dataclass
@@ -232,10 +232,8 @@ class Registry:
     hierarchical with no global registry.
     """
 
-    def __init__(self, *, name_seed: str = ""):
+    def __init__(self):
         self._workers: dict[str, BackgroundWorker] = {}
-        self._name_seed = name_seed
-        self._auto_counter = 0
         _ALL_REGISTRIES.add(self)
 
     def get(self, name: str) -> Handle | None:
@@ -244,13 +242,6 @@ class Registry:
 
     def list(self) -> list[str]:
         return sorted(self._workers)
-
-    def _auto_name(self) -> str:
-        while True:
-            candidate = _auto_name(self._auto_counter, seed=self._name_seed)
-            self._auto_counter += 1
-            if candidate not in self._workers:
-                return candidate
 
     def send(
         self,
@@ -267,7 +258,7 @@ class Registry:
         session dir. Re-sending an existing name continues that worker.
         """
         if name is None:
-            name = self._auto_name()
+            name = uuid.uuid4().hex
         worker = self._workers.get(name)
         if worker is not None and worker.status == ERROR:
             raise RuntimeError(
@@ -295,7 +286,7 @@ class Registry:
                 pass
 
 
-def attach_background(module, run_callable, *, name_seed: str = ""):
+def attach_background(module, run_callable):
     """Give a wrapped callable module a stateless ``.send(*a, **kw) -> Handle``.
 
     ``send`` runs ``run_callable(*a, **kw)`` on a background worker (auto-named,
@@ -303,7 +294,7 @@ def attach_background(module, run_callable, *, name_seed: str = ""):
     kernels). The model holds the returned handle and polls it. Used to give
     uploaded skills the same background/poll lifecycle as sub-agents.
     """
-    registry = Registry(name_seed=name_seed)
+    registry = Registry()
 
     def send(*args, **kwargs):
         return registry.send(
@@ -314,76 +305,3 @@ def attach_background(module, run_callable, *, name_seed: str = ""):
 
     module.send = send
     return module
-
-
-_NAME_ADJECTIVES = (
-    "amber",
-    "brave",
-    "calm",
-    "dapper",
-    "eager",
-    "fluffy",
-    "gentle",
-    "hidden",
-    "jolly",
-    "keen",
-    "lucky",
-    "mellow",
-    "noble",
-    "quiet",
-    "rapid",
-    "sunny",
-    "tidy",
-    "vivid",
-    "witty",
-    "zesty",
-)
-_NAME_NOUNS = (
-    "sky",
-    "river",
-    "forest",
-    "meadow",
-    "canyon",
-    "harbor",
-    "glacier",
-    "ember",
-    "comet",
-    "willow",
-    "summit",
-    "lagoon",
-    "tundra",
-    "prairie",
-    "delta",
-    "cove",
-)
-_NAME_ANIMALS = (
-    "bison",
-    "otter",
-    "falcon",
-    "lynx",
-    "heron",
-    "marten",
-    "ibis",
-    "tapir",
-    "gecko",
-    "quokka",
-    "narwhal",
-    "puffin",
-    "badger",
-    "civet",
-    "wren",
-    "shrew",
-)
-
-
-def _auto_name(index: int, *, seed: str = "") -> str:
-    """Deterministic ``adjective-noun-animal`` name from ``(seed, index)``.
-
-    Deterministic so rollouts of the same prompt (same seed) draw identical
-    names — important for reproducibility in a training harness.
-    """
-    digest = hashlib.sha256(f"{seed}:{index}".encode()).digest()
-    adjective = _NAME_ADJECTIVES[digest[0] % len(_NAME_ADJECTIVES)]
-    noun = _NAME_NOUNS[digest[1] % len(_NAME_NOUNS)]
-    animal = _NAME_ANIMALS[digest[2] % len(_NAME_ANIMALS)]
-    return f"{adjective}-{noun}-{animal}"

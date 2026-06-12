@@ -56,7 +56,7 @@ async def run(prompt: str, **kwargs) -> RLMResult:
 # Per-kernel registry of named sub-agents. This module is imported fresh in each
 # IPython kernel, so the registry is naturally per-kernel (hierarchical): each
 # agent owns the registry of the children it spawned.
-_REGISTRY = Registry(name_seed=os.environ.get("RLM_SESSION_DIR", ""))
+_REGISTRY = Registry()
 
 
 class _RlmProcessor:

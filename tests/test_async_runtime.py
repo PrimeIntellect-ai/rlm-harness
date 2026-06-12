@@ -13,7 +13,6 @@ from rlm._async_runtime import (
     FINISHED,
     RUNNING,
     Registry,
-    _auto_name,
 )
 
 
@@ -154,12 +153,6 @@ async def test_auto_named_send_registers_a_worker():
     handle = reg.send(4, name=None, processor_factory=lambda _n: _Doubler())
     assert handle.name in reg.list()
     assert await handle.wait() == 8
-
-
-def test_auto_name_is_deterministic():
-    assert _auto_name(0, seed="s") == _auto_name(0, seed="s")
-    name = _auto_name(0, seed="s")
-    assert name.count("-") == 2
 
 
 async def test_attach_background_adds_send():

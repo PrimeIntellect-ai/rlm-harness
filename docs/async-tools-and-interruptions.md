@@ -105,7 +105,7 @@ just produces many results instead of one.
 - `X.send(*a, **kw) -> Handle` — **sync**; enqueue input to a (possibly new)
   background worker and return a handle immediately. The single background
   method for all tools. rlm-specific kwargs: `name` (persistence / continuation;
-  `None` → auto-generated, e.g. `beautiful-sky-bison`).
+  `None` → auto-generated as a uuid hex).
 
 **Handle:**
 
@@ -224,8 +224,8 @@ one level deeper), mirroring the per-kernel registries:
   `handle.session_dir/"messages.jsonl"` (live-tailable) and via each result's
   `RLMResult.session_dir`.
 - Names are unique **within a parent** (per-kernel), not globally —
-  `root/specialist` and `root/other/specialist` coexist. Filesystem-safe,
-  collision-checked (auto-names too).
+  `root/specialist` and `root/other/specialist` coexist. Model-supplied names are
+  sanitized filesystem-safe; an omitted name auto-generates a uuid hex.
 - Update the two `sub-*` globs that assume the random-id prefix:
   `engine.py:_detect_new_children` and `session.py:aggregate_child_metrics`.
 
@@ -276,8 +276,6 @@ one level deeper), mirroring the per-kernel registries:
 ### 3.8 Open questions (Phase 1)
 
 - `ToolState` class name (you've been calling it the "messages object").
-- Auto-name seeding: deterministic per rollout (counter / seed from session id)
-  vs. random — recommend deterministic for reproducibility.
 
 ### 3.9 Verifiers harness ripples (PR 2)
 
