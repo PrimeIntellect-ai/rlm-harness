@@ -18,6 +18,14 @@ def _sanitize_name(name: str) -> str:
     return (safe or "agent")[:64]
 
 
+_MSG_WRAPPER_KEYS = frozenset({"t", "view", "turn", "ts", "duration"})
+
+
+def _strip_msg(obj: dict) -> dict:
+    """Drop the view-log wrapper keys, leaving the raw OpenAI message dict."""
+    return {k: v for k, v in obj.items() if k not in _MSG_WRAPPER_KEYS}
+
+
 class Session:
     def __init__(self, session_dir: Path | None = None):
         if session_dir is None:
@@ -44,35 +52,62 @@ class Session:
         tmp.write_text(json.dumps(data, indent=2, default=str))
         tmp.rename(meta_path)
 
-    def log(self, entry: dict):
-        """Append a line to messages.jsonl."""
-        entry.setdefault("timestamp", time.time())
-        self._msg_file.write(json.dumps(entry, default=str) + "\n")
+    def _write(self, obj: dict) -> None:
+        """Append one typed line to messages.jsonl."""
+        obj.setdefault("ts", time.time())
+        self._msg_file.write(json.dumps(obj, default=str) + "\n")
         self._msg_file.flush()
 
-    def log_assistant(
-        self, turn: int, tool_calls: list[dict] | None, content: str | None
-    ):
-        entry = {"type": "assistant", "turn": turn}
-        if tool_calls:
-            entry["tool_calls"] = tool_calls
-        if content:
-            entry["content"] = content
-        self.log(entry)
+    def log_message(
+        self, view: int, turn: int, message: dict, *, duration: float | None = None
+    ) -> None:
+        """Append a conversation message (OpenAI shape) to the current view."""
+        line = {"t": "msg", "view": view, "turn": turn, **message}
+        if duration is not None:
+            line["duration"] = round(duration, 3)
+        self._write(line)
 
-    def log_tool_result(self, turn: int, tool: str, content: str, duration: float):
-        self.log(
+    def branch_reset(
+        self, view: int, *, dropped_chars: int, summary_chars: int, turns_since: int
+    ) -> None:
+        """Close compaction branch ``view``; later msgs carry ``view + 1``."""
+        self._write(
             {
-                "type": "tool_result",
-                "turn": turn,
-                "tool": tool,
-                "content": content,
-                "duration": round(duration, 3),
+                "t": "branch_reset",
+                "view": view,
+                "dropped_chars": dropped_chars,
+                "summary_chars": summary_chars,
+                "turns_since": turns_since,
             }
         )
 
-    def log_sub_spawn(self, child_name: str, command: str):
-        self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
+    def log_spawn(self, child: str, command: str) -> None:
+        self._write({"t": "spawn", "child": child, "command": command})
+
+    def load_latest_view(self) -> list[dict]:
+        """Reconstruct the latest view (the engine's ``_messages``) from disk.
+
+        Groups the append-only ``msg`` lines by ``view`` and returns the
+        highest view's messages, in order — the exact context the model last
+        had. ``[]`` when there is no transcript yet. Used to resume a sub-agent
+        whose in-memory engine was lost to a kernel restart.
+        """
+        path = self.dir / "messages.jsonl"
+        if not path.exists():
+            return []
+        msgs: list[dict] = []
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                if obj.get("t") == "msg":
+                    msgs.append(obj)
+        if not msgs:
+            return []
+        latest = max(m.get("view", 0) for m in msgs)
+        return [_strip_msg(m) for m in msgs if m.get("view", 0) == latest]
 
     def aggregate_child_metrics(self) -> ChildSessionAggregate:
         """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
@@ -99,12 +134,12 @@ class Session:
     def finalize(
         self, answer: str, usage: dict | None = None, turns: int = 0, metrics=None
     ):
-        entry = {"type": "done", "answer": answer[:1000]}
+        done = {"t": "done", "answer": answer[:1000]}
         if usage:
-            entry["usage"] = usage
+            done["usage"] = usage
         if turns:
-            entry["turns"] = turns
-        self.log(entry)
+            done["turns"] = turns
+        self._write(done)
 
         meta_update = {"status": "done", "answer_preview": answer[:200], "turns": turns}
         if usage:

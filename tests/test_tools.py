@@ -104,3 +104,22 @@ def test_timeout_message_flags_kernel_reset():
     assert "timed out after 5s" in interrupted and "reset" not in interrupted
     # a restart lost all REPL state, so the model is told to rebuild it
     assert "reset" in reset and "variables" in reset
+
+
+def test_session_views_round_trip(tmp_path):
+    from rlm.session import Session
+
+    s = Session(tmp_path / "s")
+    s.log_message(0, 0, {"role": "system", "content": "sys"})
+    s.log_message(0, 0, {"role": "user", "content": "hi"})
+    s.log_message(0, 1, {"role": "assistant", "content": "yo"}, duration=0.5)
+    s.branch_reset(0, dropped_chars=10, summary_chars=3, turns_since=2)
+    s.log_message(1, 2, {"role": "system", "content": "sys"})
+    s.log_message(1, 2, {"role": "user", "content": "carries the summary"})
+    s.close()
+
+    # load_latest_view returns only the newest branch, stripped to raw messages
+    assert s.load_latest_view() == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "carries the summary"},
+    ]

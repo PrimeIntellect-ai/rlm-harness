@@ -203,6 +203,7 @@ class RLMEngine:
         self._depth_exceeded = False
         self._active_tools: list[dict] = []
         self._messages: list[dict] = []
+        self._view = 0
         self._turn_offset = 0
         self._final_text = ""
 
@@ -266,10 +267,32 @@ class RLMEngine:
 
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
-        self._messages = [{"role": "system", "content": system_prompt}]
+        self._messages = []
+        self._view = 0
+        self._record_message({"role": "system", "content": system_prompt}, turn=0)
         self._turn_offset = 0
         self._final_text = ""
         self._setup_done = True
+
+    def _record_message(
+        self, message: dict, turn: int, *, duration: float | None = None
+    ) -> None:
+        """Append a message to the live conversation and persist it to its view."""
+        self._messages.append(message)
+        self.session.log_message(self._view, turn, message, duration=duration)
+
+    def _write_resume_header(self, turn: int) -> None:
+        """Persist resume state to meta.json so a hard restart can continue."""
+        self.session.write_meta(
+            usage={
+                "prompt_tokens": self._total_usage.prompt_tokens,
+                "completion_tokens": self._total_usage.completion_tokens,
+            },
+            turn_offset=turn,
+            view=self._view,
+            branch_start_turn=self._branch_start_turn,
+            metrics_state=self._metrics.snapshot(),
+        )
 
     async def advance(self, prompt: str) -> RLMResult:
         """Append a user turn and run the loop until the model stops calling tools.
@@ -292,7 +315,9 @@ class RLMEngine:
         # messages[:] = ...) mutate the persisted conversation directly.
         messages = self._messages
         active_tools = self._active_tools
-        messages.append({"role": "user", "content": prompt})
+        self._record_message(
+            {"role": "user", "content": prompt}, turn=self._turn_offset
+        )
 
         final_text = ""
         # Role of whatever the engine appended to ``messages`` since the
@@ -305,6 +330,7 @@ class RLMEngine:
         turn = self._turn_offset
         for local_turn in itertools.count():
             turn = self._turn_offset + local_turn
+            self._write_resume_header(turn)
             # Call LLM
             request_kwargs = {
                 "model": self.model,
@@ -350,9 +376,9 @@ class RLMEngine:
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
             msg_dict.setdefault("content", "")
-            messages.append(msg_dict)
+            self._record_message(msg_dict, turn=turn)
 
-            # Log assistant message; parse tool-call args once, reuse below.
+            # Parse tool-call args once; the error branches below reuse them.
             tool_calls_log: list[dict] | None = None
             parsed_args: list[dict | None] = []
             if msg.tool_calls:
@@ -366,14 +392,13 @@ class RLMEngine:
                             "args": err if args is None else args,
                         }
                     )
-            self.session.log_assistant(turn, tool_calls_log, msg.content)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
                 feedback = "Error: only one tool call per turn allowed"
                 for tc in msg.tool_calls:
-                    self.session.log_tool_result(turn, tc.function.name, feedback, 0.0)
-                    messages.append(
-                        {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                    self._record_message(
+                        {"role": "tool", "tool_call_id": tc.id, "content": feedback},
+                        turn=turn,
                     )
                 last_appended_role = "tool"
                 continue
@@ -386,9 +411,9 @@ class RLMEngine:
                     f"Error: invalid JSON arguments for tool '{tool_name}': "
                     f"{err_info['_parse_error']}"
                 )
-                self.session.log_tool_result(turn, tool_name, feedback, 0.0)
-                messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": feedback}
+                self._record_message(
+                    {"role": "tool", "tool_call_id": tc.id, "content": feedback},
+                    turn=turn,
                 )
                 last_appended_role = "tool"
                 continue
@@ -428,13 +453,10 @@ class RLMEngine:
             if self.max_output > 0 and len(result) > self.max_output:
                 result = result[: self.max_output] + "\n... [output truncated]"
 
-            self.session.log_tool_result(turn, tool_name, result, duration)
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                }
+            self._record_message(
+                {"role": "tool", "tool_call_id": tc.id, "content": result},
+                turn=turn,
+                duration=duration,
             )
             last_appended_role = "tool"
 
@@ -550,7 +572,7 @@ class RLMEngine:
         checkpoint_prompt = CHECKPOINT_COMPACTION_PROMPT
         if self._repl is not None:
             checkpoint_prompt += REPL_RESTART_NOTE
-        messages.append({"role": "user", "content": checkpoint_prompt})
+        self._record_message({"role": "user", "content": checkpoint_prompt}, turn=turn)
         request_kwargs: dict = {"model": self.model, "messages": messages}
         if active_tools:
             request_kwargs["tools"] = active_tools
@@ -565,27 +587,25 @@ class RLMEngine:
 
         summary_text = response.choices[0].message.content or ""
 
+        # The model produced the summary as an assistant turn — record it in the
+        # closing view (it isn't kept in live _messages, which is rebuilt below).
+        self.session.log_message(
+            self._view, turn, {"role": "assistant", "content": summary_text}
+        )
+        # Close this branch and open the next view.
+        self.session.branch_reset(
+            self._view,
+            dropped_chars=dropped_chars,
+            summary_chars=len(summary_text),
+            turns_since=turns_since_last,
+        )
+        self._view += 1
         system_msg = messages[0]
         compacted_user_content = POST_COMPACTION_FRAMING + "\n\n" + summary_text
-        messages[:] = [
-            system_msg,
-            {"role": "user", "content": compacted_user_content},
-        ]
-
-        # Log the compaction for traceability.
-        self.session.log(
-            {
-                "type": "compaction",
-                "turn": turn,
-                "summary": summary_text,
-                "summary_chars": len(summary_text),
-                "dropped_chars": dropped_chars,
-                "turns_since_last_compaction": turns_since_last,
-                "usage": {
-                    "prompt_tokens": usage.prompt_tokens,
-                    "completion_tokens": usage.completion_tokens,
-                },
-            }
+        messages[:] = []
+        self._record_message(system_msg, turn=turn)
+        self._record_message(
+            {"role": "user", "content": compacted_user_content}, turn=turn
         )
 
         # Metrics: close the old branch.
@@ -624,7 +644,7 @@ class RLMEngine:
         current = {p.name for p in self.session.dir.glob("sub-*")}
         new = current - self._known_children
         for child_name in sorted(new):
-            self.session.log_sub_spawn(child_name, "(spawned via rlm())")
+            self.session.log_spawn(child_name, "(spawned via rlm())")
         self._known_children = current
 
     def _tool_context(self, messages: list[dict]) -> ToolContext:

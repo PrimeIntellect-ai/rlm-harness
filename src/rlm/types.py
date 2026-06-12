@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -261,6 +261,23 @@ class RLMMetrics:
     _tool_response_tokens: int = field(default=0, repr=False)
     _sub_rlm_tool_response_tokens: int = field(default=0, repr=False)
     _sub_rlm_enabled: bool = field(default=False, repr=False)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Full JSON-safe state for persisting a resume header to meta.json."""
+        data = asdict(self)
+        data["_retained_completion_tokens"] = list(self._retained_completion_tokens)
+        return data
+
+    @classmethod
+    def restore(cls, data: dict[str, Any]) -> RLMMetrics:
+        """Rebuild from :meth:`snapshot` (resume after a kernel restart)."""
+        names = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in data.items() if k in names}
+        if "_retained_completion_tokens" in kwargs:
+            kwargs["_retained_completion_tokens"] = deque(
+                kwargs["_retained_completion_tokens"]
+            )
+        return cls(**kwargs)
 
     def note_root_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
         self._root_input_tokens = prompt_tokens
