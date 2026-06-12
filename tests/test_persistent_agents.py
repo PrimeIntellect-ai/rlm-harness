@@ -191,3 +191,34 @@ async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     lim.release_slot(held)
     result = await asyncio.wait_for(started, timeout=3)
     assert result.answer == "done"
+
+
+async def test_engine_resumes_from_disk(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")  # no sub-kernel
+    monkeypatch.delenv("RLM_DEPTH", raising=False)
+    monkeypatch.delenv("RLM_MAX_DEPTH", raising=False)
+    from rlm.engine import RLMEngine
+    from rlm.session import Session
+
+    sdir = tmp_path / "agent"
+    e1 = RLMEngine(
+        session=Session(sdir),
+        client=DummyClient([DummyMessage(content="first answer")]),
+    )
+    await e1.run("original task")
+
+    # the engine object is gone (as after a kernel restart); a fresh engine on
+    # the same session dir resumes the conversation from the on-disk view.
+    e2 = RLMEngine(
+        session=Session(sdir),
+        client=DummyClient([DummyMessage(content="second answer")]),
+    )
+    e2.setup()
+    contents = [m.get("content") for m in e2._messages]
+    assert e2._messages[0]["role"] == "system"
+    assert "original task" in contents  # prior turn restored from disk
+    assert any("kernel was restarted" in (c or "") for c in contents)  # warned
+
+    result = await e2.advance("follow-up")
+    assert result.answer == "second answer"  # continues with the restored context
+    await e2.aclose()

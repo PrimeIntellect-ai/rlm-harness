@@ -65,6 +65,15 @@ POST_COMPACTION_FRAMING = (
     "information in this summary to assist with your own analysis:"
 )
 
+# Injected when an agent resumes from disk after its kernel was restarted: the
+# conversation is restored but the IPython REPL is brand new.
+KERNEL_RESET_RESUME_WARNING = (
+    "WARNING: this agent resumed after its kernel was restarted. Your "
+    "conversation is intact, but the IPython session is brand new — every "
+    "variable, import, and in-memory object from before is gone. Re-create "
+    "anything you need before using it."
+)
+
 
 def _is_request_too_large(e: BadRequestError) -> bool:
     """True if a 400 matches the proxy's "Request Entity Too Large" body."""
@@ -267,10 +276,14 @@ class RLMEngine:
 
         messages_path = str(self.session.dir / "messages.jsonl")
         system_prompt = self._load_system_prompt(messages_path, active_builtin_tools)
-        self._messages = []
-        self._view = 0
-        self._record_message({"role": "system", "content": system_prompt}, turn=0)
-        self._turn_offset = 0
+        prior = self.session.load_latest_view()
+        if prior:
+            self._resume(prior)
+        else:
+            self._messages = []
+            self._view = 0
+            self._record_message({"role": "system", "content": system_prompt}, turn=0)
+            self._turn_offset = 0
         self._final_text = ""
         self._setup_done = True
 
@@ -293,6 +306,41 @@ class RLMEngine:
             branch_start_turn=self._branch_start_turn,
             metrics_state=self._metrics.snapshot(),
         )
+
+    def _resume(self, prior_messages: list[dict]) -> None:
+        """Continue an agent whose in-memory engine was lost to a kernel restart.
+
+        Loads the last on-disk view as ``_messages`` and restores the resume
+        header from meta.json, then injects a kernel-reset warning: the
+        conversation survived but the REPL is brand new.
+        """
+        self._messages = list(prior_messages)
+        header = self._read_resume_header()
+        self._view = header.get("view", 0)
+        self._turn_offset = header.get("turn_offset", 0)
+        usage = header.get("usage") or {}
+        self._total_usage = TokenUsage(
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+        )
+        self._branch_start_turn = header.get("branch_start_turn", 0)
+        state = header.get("metrics_state")
+        if state:
+            self._metrics = RLMMetrics.restore(state)
+            self._metrics._sub_rlm_enabled = self.max_depth > 0
+        self._record_message(
+            {"role": "user", "content": KERNEL_RESET_RESUME_WARNING},
+            turn=self._turn_offset,
+        )
+
+    def _read_resume_header(self) -> dict:
+        meta_path = self.session.dir / "meta.json"
+        if not meta_path.exists():
+            return {}
+        try:
+            return json.loads(meta_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
 
     async def advance(self, prompt: str) -> RLMResult:
         """Append a user turn and run the loop until the model stops calling tools.
