@@ -53,7 +53,15 @@ IPYTHON_SCHEMA = {
 }
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_NATIVE_TOOL_MARKUP_RE = re.compile(r"<(?:tool_call|arg_key|arg_value)>")
 IPYTHON_TIMEOUT_MAX_SECONDS = 600
+NATIVE_TOOL_MARKUP_ERROR = (
+    "Error: IPython code contains native tool-call markup such as "
+    "<tool_call>, <arg_key>, or <arg_value>. That markup is not Python. "
+    "Inside IPython, call skills with Python syntax, for example: "
+    'old = "..."; new = "..."; await edit(path="pkg/module.py", '
+    "old_str=old, new_str=new)."
+)
 
 
 class IpythonTool:
@@ -94,6 +102,12 @@ class IpythonTool:
         if context.repl is None:
             return ToolOutcome(
                 content="Error: IPython REPL is not available",
+                metric_events=metric_events,
+            )
+
+        if _NATIVE_TOOL_MARKUP_RE.search(code):
+            return ToolOutcome(
+                content=NATIVE_TOOL_MARKUP_ERROR,
                 metric_events=metric_events,
             )
 
