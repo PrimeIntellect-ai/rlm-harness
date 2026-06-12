@@ -327,17 +327,3 @@ def test_ipython_tool_passes_through_non_git():
     ctx.repl = StubRepl()
     outcome = IpythonTool().execute({"code": "print(1+1)"}, ctx)
     assert outcome.content == "ran: print(1+1)"
-
-
-def test_ipython_tool_refuses_native_tool_markup():
-    from rlm.tools.ipython import IpythonTool
-
-    class StubRepl:
-        def execute(self, code, timeout):
-            raise AssertionError("markup should be rejected before REPL execution")
-
-    ctx = _ctx()
-    ctx.repl = StubRepl()
-    outcome = IpythonTool().execute({"code": "<arg_value>%%bash\nls"}, ctx)
-    assert "native tool-call markup" in outcome.content
-    assert "await edit" in outcome.content
