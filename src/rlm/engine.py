@@ -299,6 +299,11 @@ class RLMEngine:
             )
 
             msg = response.choices[0].message
+            # Dump the WHOLE assistant message back into history: model_dump carries the
+            # provider's reasoning fields (reasoning_content / reasoning / reasoning_details)
+            # alongside content + tool_calls. Reasoning models (DeepSeek V4, Kimi K2 Thinking)
+            # require their prior-turn reasoning echoed back in later turns, so keep this a
+            # full round-trip — don't narrow it to hand-picked fields.
             msg_dict = msg.model_dump(exclude_none=True)
             msg_dict.setdefault("content", "")
             messages.append(msg_dict)
