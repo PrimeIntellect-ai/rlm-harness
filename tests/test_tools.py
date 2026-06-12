@@ -94,3 +94,13 @@ def test_bash_tool_handles_non_utf8_output():
     )
     outcome = tool.execute({"command": "printf '\\xf0'"}, ctx)
     assert "�" in outcome.content
+
+
+def test_timeout_message_flags_kernel_reset():
+    from rlm.tools.ipython import IPythonREPL
+
+    interrupted = IPythonREPL._timeout_message(5, restarted=False)
+    reset = IPythonREPL._timeout_message(5, restarted=True)
+    assert "timed out after 5s" in interrupted and "reset" not in interrupted
+    # a restart lost all REPL state, so the model is told to rebuild it
+    assert "reset" in reset and "variables" in reset

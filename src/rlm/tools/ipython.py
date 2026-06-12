@@ -260,11 +260,29 @@ if {allow_recursion!r}:
         self._kc.wait_for_ready(timeout=30)
         self._inject_startup()
 
-    def _interrupt_and_recover(self):
-        """Interrupt the running cell and restart the kernel if needed."""
+    def _interrupt_and_recover(self) -> bool:
+        """Interrupt the running cell, restarting the kernel if it won't yield.
+
+        Returns ``True`` if the kernel had to be restarted (so all variables,
+        imports, and in-memory state were lost); ``False`` if the interrupt
+        alone recovered it.
+        """
         self._km.interrupt_kernel()
         if not self._wait_for_idle(timeout=2):
             self.restart_kernel()
+            return True
+        return False
+
+    @staticmethod
+    def _timeout_message(timeout: int, restarted: bool) -> str:
+        msg = f"\n[execution timed out after {timeout}s and was interrupted]"
+        if restarted:
+            msg += (
+                "\n[the IPython kernel was reset to recover it — all variables, "
+                "imports, and in-memory state are gone; rebuild anything you need "
+                "before relying on it]"
+            )
+        return msg
 
     def execute(self, code: str, timeout: int | None = None) -> str:
         """Execute code and return combined output."""
@@ -283,18 +301,14 @@ if {allow_recursion!r}:
                 else:
                     wait_timeout = deadline - time.monotonic()
                     if wait_timeout <= 0:
-                        self._interrupt_and_recover()
-                        outputs.append(
-                            f"\n[execution timed out after {timeout}s and was interrupted]"
-                        )
+                        restarted = self._interrupt_and_recover()
+                        outputs.append(self._timeout_message(timeout, restarted))
                         break
                 try:
                     msg = self._kc.get_iopub_msg(timeout=wait_timeout)
                 except Empty:
-                    self._interrupt_and_recover()
-                    outputs.append(
-                        f"\n[execution timed out after {timeout}s and was interrupted]"
-                    )
+                    restarted = self._interrupt_and_recover()
+                    outputs.append(self._timeout_message(timeout, restarted))
                     break
 
                 if msg["parent_header"].get("msg_id") != msg_id:
