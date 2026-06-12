@@ -47,7 +47,9 @@ IPYTHON_CONTROL_PROMPT = (
     "benchmark, or API may have its own environment and normal interface. "
     "Evaluate external systems through their own interface, then use IPython "
     "to coordinate the process and analyze what comes back.\n\n"
-    "When running shell commands from IPython, use `%%bash` cells. Avoid "
+    "When running shell commands from IPython, use `%%bash` cells. If you use "
+    "`%%bash`, it must be the first line of the code cell: no comments, "
+    "spaces, blank lines, imports, or Python statements before it. Avoid "
     "`!cmd` shell escapes for project commands so shell behavior is explicit "
     "and multi-line commands share one shell context.\n\n"
     "Important: do not install dependencies into the IPython kernel just to "
@@ -62,6 +64,13 @@ IPYTHON_CONTROL_PROMPT = (
     "reusable variables you can slice, filter, and act on without re-reading. "
     "Always assign read/search results to named variables so you can revisit "
     "them later."
+)
+EDIT_SKILL_PROMPT = (
+    "For targeted existing-file edits, prefer the pre-imported async `edit` "
+    "skill from IPython: `old = '''...'''; new = '''...'''; await "
+    'edit(path="pkg/file.py", old_str=old, new_str=new)`. Use exact '
+    "old/new strings; if the text contains triple double quotes, use triple "
+    "single-quoted variables or build `old`/`new` from inspected file slices."
 )
 
 
@@ -108,6 +117,8 @@ def build_system_prompt(
             "Each skill is also available as a shell command by the same name: `<skill> ...`. "
             "Discover its CLI usage with `<skill> --help`."
         )
+        if "edit" in installed_skills:
+            skill_lines.append(EDIT_SKILL_PROMPT)
     if skill_lines:
         parts.extend(["", *skill_lines])
 
