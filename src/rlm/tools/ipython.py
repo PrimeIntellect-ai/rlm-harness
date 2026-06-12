@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import copy
 import os
-from queue import Empty
 import re
 import sys
 import threading
 import time
+from queue import Empty
 from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
@@ -68,8 +68,7 @@ class IpythonTool:
         )
         schema = copy.deepcopy(IPYTHON_SCHEMA)
         schema["function"]["parameters"]["properties"]["timeout"]["description"] = (
-            "Optional timeout in seconds. "
-            f"Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
+            f"Optional timeout in seconds. Default: {timeout}s. Maximum: {IPYTHON_TIMEOUT_MAX_SECONDS}s."
         )
         return schema
 

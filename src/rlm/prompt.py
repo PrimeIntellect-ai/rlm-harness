@@ -99,13 +99,13 @@ EDIT_SKILL_PROMPT = (
     "For targeted modifications to existing files, you must use the "
     "pre-imported `edit` skill from IPython instead of manual Python file "
     "writes. Read and inspect files with normal Python, then make the change "
-    "with `await edit(path=\"relative/file.py\", old_str=old, new_str=new)`, "
+    'with `await edit(path="relative/file.py", old_str=old, new_str=new)`, '
     "where `old` and `new` are exact strings. Inline string literals are fine "
     "when they are valid Python. The target `old_str` must appear exactly "
     "once. Inside IPython `code`, never write native tool-call markup like "
     "`<tool_call>`, `<arg_key>`, or `<arg_value>`; use Python "
-    "instead, for example: `old = \"...\"; new = \"...\"; await "
-    "edit(path=\"pkg/module.py\", old_str=old, new_str=new)`. "
+    'instead, for example: `old = "..."; new = "..."; await '
+    'edit(path="pkg/module.py", old_str=old, new_str=new)`. '
     "The supported keyword arguments are `path`, `old_str`, `new_str`, "
     "and optional `cwd`; do not use `file`, `old`, `new`, line numbers, "
     "`after`, or `insert`. If an edit call fails because the string is not "
@@ -114,7 +114,7 @@ EDIT_SKILL_PROMPT = (
     "new files or for broad generated rewrites that cannot be expressed as "
     "one or more exact replacements.\n\n"
     "Before calling `edit`, make sure the Python string syntax is valid. Do "
-    "not wrap text that contains `\"\"\"` inside a `\"\"\"...\"\"\"` string; "
+    'not wrap text that contains `"""` inside a `"""..."""` string; '
     "that creates a SyntaxError before `edit` runs. If the target text "
     "contains triple double quotes, use triple single quotes (`'''...'''`) or "
     "assign `old`/`new` from inspected file slices. If the text contains both "
@@ -123,27 +123,27 @@ EDIT_SKILL_PROMPT = (
     "Good targeted edit pattern:\n"
     "```python\n"
     "from pathlib import Path\n"
-    "text = Path(\"pkg/module.py\").read_text()\n"
-    "print(text[text.index(\"def broken\") : text.index(\"def next_func\")])\n"
+    'text = Path("pkg/module.py").read_text()\n'
+    'print(text[text.index("def broken") : text.index("def next_func")])\n'
     "old = '''def broken():\n"
-    "    \"\"\"Docstring with triple double quotes.\"\"\"\n"
+    '    """Docstring with triple double quotes."""\n'
     "    return False\n"
     "'''\n"
     "new = '''def broken():\n"
-    "    \"\"\"Docstring with triple double quotes.\"\"\"\n"
+    '    """Docstring with triple double quotes."""\n'
     "    return True\n"
     "'''\n"
-    "await edit(path=\"pkg/module.py\", old_str=old, new_str=new)\n"
+    'await edit(path="pkg/module.py", old_str=old, new_str=new)\n'
     "```\n"
     "Do not do this for targeted edits:\n"
     "```python\n"
-    "await edit(path=\"pkg/module.py\", old_str=\"\"\"def broken():\n"
-    "    \"\"\"Docstring closes the outer string early.\"\"\"\n"
+    'await edit(path="pkg/module.py", old_str="""def broken():\n'
+    '    """Docstring closes the outer string early."""\n'
     "    return False\n"
-    "\"\"\", new_str=\"\"\"...\n"
-    "\"\"\")\n"
-    "Path(\"pkg/module.py\").write_text(text.replace(old, new))\n"
-    "open(\"pkg/module.py\", \"w\").write(new_contents)\n"
+    '""", new_str="""...\n'
+    '""")\n'
+    'Path("pkg/module.py").write_text(text.replace(old, new))\n'
+    'open("pkg/module.py", "w").write(new_contents)\n'
     "```"
 )
 
