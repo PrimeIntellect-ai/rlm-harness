@@ -2,8 +2,8 @@
 
 ``send(...)`` schedules a tool invocation as a background asyncio task on the
 kernel's event loop and returns a :class:`Handle` the model can ``poll()`` across
-cells. The kernel loop keeps these tasks progressing between cells (verified —
-see ``docs/async-tools-and-interruptions.md``).
+cells. The kernel loop keeps these tasks progressing between cells (see
+``docs/background-subagents-and-tools.md``).
 
 A worker owns an inbox and drains it sequentially via a :class:`Processor`:
 
