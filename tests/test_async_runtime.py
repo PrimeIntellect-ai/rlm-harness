@@ -12,6 +12,7 @@ from rlm._async_runtime import (
     ERROR,
     FINISHED,
     RUNNING,
+    BackgroundWorker,
     Registry,
 )
 
@@ -56,14 +57,14 @@ async def _settle(handle, *, want=FINISHED, tries=400):
 
 async def test_send_wait_returns_result():
     reg = Registry()
-    handle = reg.send(5, name="w", processor_factory=lambda _n: _Doubler())
+    handle = reg.send(5, name="w", worker_factory=lambda n: BackgroundWorker(n, _Doubler()))
     assert await handle.wait() == 10
     assert handle.poll().status == FINISHED
 
 
 async def test_poll_does_not_consume_results():
     reg = Registry()
-    handle = reg.send(3, name="w", processor_factory=lambda _n: _Doubler())
+    handle = reg.send(3, name="w", worker_factory=lambda n: BackgroundWorker(n, _Doubler()))
     await _settle(handle)
     assert list(handle.poll().results) == [6]
     assert list(handle.poll().results) == [6]  # second poll still sees it
@@ -74,7 +75,7 @@ async def test_poll_does_not_consume_results():
 async def test_running_status_while_processing():
     reg = Registry()
     proc = _Gated()
-    handle = reg.send(1, name="w", processor_factory=lambda _n: proc)
+    handle = reg.send(1, name="w", worker_factory=lambda n: BackgroundWorker(n, proc))
     await asyncio.sleep(0.02)
     assert handle.poll().status == RUNNING
     proc.gate.set()
@@ -88,10 +89,10 @@ async def test_same_name_continues_one_worker():
 
     def factory(name):
         created.append(name)
-        return _Doubler()
+        return BackgroundWorker(name, _Doubler())
 
-    reg.send(2, name="spec", processor_factory=factory)
-    handle = reg.send(3, name="spec", processor_factory=factory)
+    reg.send(2, name="spec", worker_factory=factory)
+    handle = reg.send(3, name="spec", worker_factory=factory)
     assert created == ["spec"]  # factory built once; the second send reused the worker
     await _settle(handle)
     assert list(handle.poll().results) == [4, 6]  # FIFO order
@@ -101,9 +102,9 @@ async def test_same_name_continues_one_worker():
 async def test_queued_is_editable():
     reg = Registry()
     proc = _Gated()
-    handle = reg.send("a", name="w", processor_factory=lambda _n: proc)
-    reg.send("b", name="w", processor_factory=lambda _n: proc)
-    reg.send("c", name="w", processor_factory=lambda _n: proc)
+    handle = reg.send("a", name="w", worker_factory=lambda n: BackgroundWorker(n, proc))
+    reg.send("b", name="w", worker_factory=lambda n: BackgroundWorker(n, proc))
+    reg.send("c", name="w", worker_factory=lambda n: BackgroundWorker(n, proc))
     # "a" is being processed (gated); "b","c" are pending and editable.
     await asyncio.sleep(0.02)
     queued = handle.poll().queued
@@ -116,7 +117,7 @@ async def test_queued_is_editable():
 
 async def test_error_surfaces_live_exception():
     reg = Registry()
-    handle = reg.send(1, name="w", processor_factory=lambda _n: _Boom())
+    handle = reg.send(1, name="w", worker_factory=lambda n: BackgroundWorker(n, _Boom()))
     await _settle(handle, want=ERROR)
     state = handle.poll()
     assert state.status == ERROR
@@ -125,7 +126,7 @@ async def test_error_surfaces_live_exception():
         await handle.wait()
     # reusing an errored name is refused; start a fresh one under a different name
     with pytest.raises(RuntimeError, match="halted with an error"):
-        reg.send(2, name="w", processor_factory=lambda _n: _Boom())
+        reg.send(2, name="w", worker_factory=lambda n: BackgroundWorker(n, _Boom()))
 
 
 async def test_close_all_tears_down_workers():
@@ -141,7 +142,7 @@ async def test_close_all_tears_down_workers():
 
     reg = Registry()
     proc = _P()
-    handle = reg.send(1, name="w", processor_factory=lambda _n: proc)
+    handle = reg.send(1, name="w", worker_factory=lambda n: BackgroundWorker(n, proc))
     await _settle(handle)
     await reg.close_all()
     assert reg.get("w") is None
@@ -150,7 +151,7 @@ async def test_close_all_tears_down_workers():
 
 async def test_auto_named_send_registers_a_worker():
     reg = Registry()
-    handle = reg.send(4, name=None, processor_factory=lambda _n: _Doubler())
+    handle = reg.send(4, name=None, worker_factory=lambda n: BackgroundWorker(n, _Doubler()))
     assert reg.get(handle.name) is not None
     assert await handle.wait() == 8
 

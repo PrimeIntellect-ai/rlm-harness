@@ -12,7 +12,7 @@ from rlm._agent_limit import (
     acquire_slot_blocking,
     release_slot,
 )
-from rlm._async_runtime import Handle, Registry, close_all_registries
+from rlm._async_runtime import BackgroundWorker, Handle, Registry, close_all_registries
 from rlm.config import get_config
 from rlm.engine import RLMEngine
 from rlm.session import Session, _sanitize_name
@@ -45,10 +45,12 @@ async def run(prompt: str, **kwargs) -> RLMResult:
         if child:
             kwargs["session"] = child
     total_marker = running_marker = None
-    if _is_subagent():
-        total_marker = await acquire_slot_blocking(TOTAL)
-        running_marker = await acquire_slot_blocking(RUNNING)
     try:
+        # Acquire inside the try so a cancellation/error between the two
+        # blocking acquires still releases whatever was already reserved.
+        if _is_subagent():
+            total_marker = await acquire_slot_blocking(TOTAL)
+            running_marker = await acquire_slot_blocking(RUNNING)
         engine = RLMEngine(**kwargs)
         return await engine.run(prompt)
     finally:
@@ -146,45 +148,32 @@ def send(
     if max_tokens is not None:
         engine_kwargs.setdefault("max_tokens", max_tokens)
 
-    # Reserve a *total* (resident) slot for a new agent; continuation reuses it.
-    # At capacity, raise rather than silently spawning — distinct from a runtime
-    # failure surfaced via poll().error. The per-turn running slot is taken inside
-    # the processor.
-    is_new = name is None or _REGISTRY.get(name) is None
-    total_marker = None
-    if is_new and _is_subagent():
-        granted, total_marker = acquire_slot(TOTAL)
-        if not granted:
-            raise AgentLimitReached(
-                "total sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
-                "reuse an existing agent (re-send its name) instead of starting another"
-            )
+    def worker_factory(agent_name: str) -> BackgroundWorker:
+        # Called only for a *new* agent (the registry reuses a live worker for a
+        # continuation), so this is the single place a resident slot is reserved
+        # and — on any creation failure — released. At capacity, raise rather than
+        # silently spawning (distinct from a runtime failure surfaced via
+        # poll().error). Once the worker is returned, its _RlmProcessor owns the
+        # slot and reaps it on error / teardown; the per-turn running slot is
+        # taken inside the processor.
+        total_marker = None
+        if _is_subagent():
+            granted, total_marker = acquire_slot(TOTAL)
+            if not granted:
+                raise AgentLimitReached(
+                    "total sub-agent cap (RLM_MAX_LIVE_AGENTS) reached; "
+                    "reuse an existing agent (re-send its name) instead of starting another"
+                )
+        try:
+            session = _child_session(name=agent_name)
+            session_dir = session.dir if session is not None else None
+            processor = _RlmProcessor(session, engine_kwargs, total_marker=total_marker)
+            return BackgroundWorker(agent_name, processor, session_dir=session_dir)
+        except Exception:
+            release_slot(total_marker)
+            raise
 
-    holder: dict[str, Session | None] = {}
-
-    def session_dir_factory(agent_name: str):
-        session = _child_session(name=agent_name)
-        holder["session"] = session
-        return session.dir if session is not None else None
-
-    def processor_factory(agent_name: str) -> _RlmProcessor:
-        return _RlmProcessor(
-            holder.get("session"), engine_kwargs, total_marker=total_marker
-        )
-
-    try:
-        return _REGISTRY.send(
-            prompt,
-            name=name,
-            processor_factory=processor_factory,
-            session_dir_factory=session_dir_factory,
-        )
-    except Exception:
-        # Registration failed before the processor took ownership of the slot
-        # (e.g. creating the child session raised); release it here so a partial
-        # failure doesn't permanently consume the cap.
-        release_slot(total_marker)
-        raise
+    return _REGISTRY.send(prompt, name=name, worker_factory=worker_factory)
 
 
 def _drain_agents() -> None:
@@ -195,4 +184,8 @@ def _drain_agents() -> None:
     reentrant, so each child finalizes its session and cascade-closes its own
     grandchildren before the caller shuts this kernel down.
     """
-    asyncio.get_event_loop().run_until_complete(close_all_registries())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    loop.run_until_complete(close_all_registries())

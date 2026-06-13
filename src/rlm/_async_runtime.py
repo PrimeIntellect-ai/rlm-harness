@@ -133,6 +133,8 @@ class BackgroundWorker:
         )
 
     def submit(self, item: Any) -> None:
+        if self._closing or self._task.done():
+            raise RuntimeError(f"worker {self.name!r} is closed; cannot submit")
         self.queued.append(item)
         self._status = RUNNING
         self._wake.set()
@@ -178,7 +180,12 @@ class BackgroundWorker:
             await self._progress.wait()
 
     async def close(self) -> None:
-        """Cancel the drain task and run processor teardown (idempotent)."""
+        """Cancel the drain task and run processor teardown (idempotent).
+
+        Settles on a terminal status so a held handle never reports a stale
+        ``RUNNING`` after teardown: ``ERROR`` is preserved (``poll().error`` stays
+        meaningful), otherwise the worker reports ``FINISHED``.
+        """
         self._closing = True
         self._wake.set()
         if not self._task.done():
@@ -188,6 +195,8 @@ class BackgroundWorker:
             except (asyncio.CancelledError, Exception):
                 pass
         await self._processor.teardown()
+        if self._status != ERROR:
+            self._status = FINISHED
 
 
 class Handle:
@@ -241,14 +250,14 @@ class Registry:
         item: Any,
         *,
         name: str | None,
-        processor_factory: Callable[[str], Processor],
-        session_dir_factory: Callable[[str], Path | None] | None = None,
+        worker_factory: Callable[[str], BackgroundWorker],
     ) -> Handle:
         """Enqueue ``item`` to a worker named ``name`` (creating it if needed).
 
-        A new (or replacement-of-errored) worker is built via
-        ``processor_factory(name)``; ``session_dir_factory(name)`` supplies its
-        session dir. Re-sending an existing name continues that worker.
+        ``worker_factory(name)`` is called **only** when no live worker exists for
+        ``name``, so continuations reuse the running worker and never rebuild it.
+        Re-sending a name whose worker halted with an error is refused — start a
+        fresh one under a different name.
         """
         if name is None:
             name = uuid.uuid4().hex
@@ -258,12 +267,7 @@ class Registry:
                 f"agent {name!r} halted with an error; start a fresh one under a different name"
             )
         if worker is None:
-            session_dir = (
-                session_dir_factory(name) if session_dir_factory is not None else None
-            )
-            worker = BackgroundWorker(
-                name, processor_factory(name), session_dir=session_dir
-            )
+            worker = worker_factory(name)
             self._workers[name] = worker
         worker.submit(item)
         return Handle(worker)
