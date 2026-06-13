@@ -112,7 +112,7 @@ class ProgrammaticToolCallStats:
         return asdict(self)
 
 
-def _empty_context_token_stats() -> dict[str, int]:
+def empty_context_token_stats() -> dict[str, int]:
     return {
         "session_count": 0,
         "input_tokens_total": 0,
@@ -133,7 +133,7 @@ class ChildSessionAggregate:
     """Aggregated stats across all recursive descendants of a session."""
 
     context_token_stats: dict[str, int] = field(
-        default_factory=_empty_context_token_stats
+        default_factory=empty_context_token_stats
     )
     tool_call_stats: ProgrammaticToolCallStats = field(
         default_factory=ProgrammaticToolCallStats

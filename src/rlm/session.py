@@ -13,18 +13,18 @@ from rlm.config import get_config
 from rlm.types import ChildSessionAggregate, ProgrammaticToolCallStats
 
 
-def _sanitize_name(name: str) -> str:
+def sanitize_name(name: str) -> str:
     """Make ``name`` filesystem-safe for a session dir; non-empty and bounded."""
     safe = re.sub(r"[^A-Za-z0-9._-]", "-", name).strip("-")
     return (safe or "agent")[:64]
 
 
-_MSG_WRAPPER_KEYS = frozenset({"t", "view", "turn", "ts", "duration"})
+MSG_WRAPPER_KEYS = frozenset({"t", "view", "turn", "ts", "duration"})
 
 
-def _strip_msg(obj: dict) -> dict:
+def strip_msg(obj: dict) -> dict:
     """Drop the view-log wrapper keys, leaving the raw OpenAI message dict."""
-    return {k: v for k, v in obj.items() if k not in _MSG_WRAPPER_KEYS}
+    return {k: v for k, v in obj.items() if k not in MSG_WRAPPER_KEYS}
 
 
 class Session:
@@ -120,7 +120,7 @@ class Session:
         if not msgs:
             return 0, []
         latest = max(m.get("view", 0) for m in msgs)
-        return latest, [_strip_msg(m) for m in msgs if m.get("view", 0) == latest]
+        return latest, [strip_msg(m) for m in msgs if m.get("view", 0) == latest]
 
     def aggregate_child_metrics(self) -> ChildSessionAggregate:
         """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
@@ -185,7 +185,7 @@ class Session:
         re-sends, human-readable); otherwise a random ``sub-<id>``.
         """
         if name is not None:
-            child = Path(parent_dir) / f"sub-{_sanitize_name(name)}"
+            child = Path(parent_dir) / f"sub-{sanitize_name(name)}"
             child.mkdir(parents=True, exist_ok=True)
         else:
             child_id = uuid.uuid4().hex[:8]

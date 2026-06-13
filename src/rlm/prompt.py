@@ -128,10 +128,10 @@ def build_system_prompt(
             ]
         )
 
-    if _has_tool(active_tools, "ipython"):
+    if has_tool(active_tools, "ipython"):
         parts.extend(["", IPYTHON_CONTROL_PROMPT])
 
-    if _should_include_git_history_guard(active_tools):
+    if should_include_git_history_guard(active_tools):
         parts.extend(["", GIT_HISTORY_GUARD_PROMPT])
 
     if active_tools:
@@ -140,11 +140,11 @@ def build_system_prompt(
     return "\n".join(parts)
 
 
-def _should_include_git_history_guard(active_tools: list["BuiltinTool"]) -> bool:
+def should_include_git_history_guard(active_tools: list["BuiltinTool"]) -> bool:
     if allow_git():
         return False
     return any(tool.name in SHELL_TOOL_NAMES for tool in active_tools)
 
 
-def _has_tool(active_tools: list["BuiltinTool"], name: str) -> bool:
+def has_tool(active_tools: list["BuiltinTool"], name: str) -> bool:
     return any(tool.name == name for tool in active_tools)

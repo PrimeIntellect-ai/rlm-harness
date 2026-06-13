@@ -15,20 +15,20 @@ from rlm.agent_limit import (
 from rlm.async_runtime import BackgroundWorker, Handle, Registry, close_all_registries
 from rlm.config import get_config
 from rlm.engine import RLMEngine
-from rlm.session import Session, _sanitize_name
+from rlm.session import Session, sanitize_name
 from rlm.types import RLMResult
 
 
-def _is_subagent() -> bool:
+def is_subagent() -> bool:
     """True below the root rollout (depth > 0), so this agent counts against the
     live-agent caps; the root rollout (depth 0) is uncapped."""
     return get_config().depth > 0
 
 
-def _child_session(name: str | None = None) -> Session | None:
+def child_session(name: str | None = None) -> Session | None:
     """If inside a parent session (depth > 0), create a child under it."""
     parent_dir = get_config().session_dir
-    if parent_dir and _is_subagent():
+    if parent_dir and is_subagent():
         return Session(Session.child_dir(parent_dir, name=name))
     return None
 
@@ -41,14 +41,14 @@ async def run(prompt: str, **kwargs) -> RLMResult:
     The root rollout is not capped.
     """
     if "session" not in kwargs:
-        child = _child_session()
+        child = child_session()
         if child:
             kwargs["session"] = child
     total_marker = running_marker = None
     try:
         # Acquire inside the try so a cancellation/error between the two
         # blocking acquires still releases whatever was already reserved.
-        if _is_subagent():
+        if is_subagent():
             total_marker = await acquire_slot_blocking(TOTAL)
             running_marker = await acquire_slot_blocking(RUNNING)
         engine = RLMEngine(**kwargs)
@@ -63,7 +63,7 @@ async def run(prompt: str, **kwargs) -> RLMResult:
 # Per-kernel registry of named sub-agents. This module is imported fresh in each
 # IPython kernel, so the registry is naturally per-kernel (hierarchical): each
 # agent owns the registry of the children it spawned.
-_REGISTRY = Registry()
+REGISTRY = Registry()
 
 
 class _RlmProcessor:
@@ -94,7 +94,7 @@ class _RlmProcessor:
                     kwargs.setdefault("session", self._session)
                 self._engine = RLMEngine(**kwargs)
                 self._engine.setup()
-            if _is_subagent():
+            if is_subagent():
                 running_marker = await acquire_slot_blocking(RUNNING)
             return await self._engine.advance(prompt)
         except Exception:
@@ -140,7 +140,7 @@ def send(
     # (child_dir sanitizes too): names that differ only in unsafe characters
     # address one agent and one transcript, not two.
     if name is not None:
-        name = _sanitize_name(name)
+        name = sanitize_name(name)
 
     # A non-positive request means "no explicit budget": treat it as omitted so it
     # falls back to the ceiling / default, instead of 0 disabling the budget by
@@ -162,7 +162,7 @@ def send(
         # slot and reaps it on error / teardown; the per-turn running slot is
         # taken inside the processor.
         total_marker = None
-        if _is_subagent():
+        if is_subagent():
             granted, total_marker = acquire_slot(TOTAL)
             if not granted:
                 raise AgentLimitReached(
@@ -170,7 +170,7 @@ def send(
                     "reuse an existing agent (re-send its name) instead of starting another"
                 )
         try:
-            session = _child_session(name=agent_name)
+            session = child_session(name=agent_name)
             session_dir = session.dir if session is not None else None
             processor = _RlmProcessor(session, engine_kwargs, total_marker=total_marker)
             return BackgroundWorker(agent_name, processor, session_dir=session_dir)
@@ -178,10 +178,10 @@ def send(
             release_slot(total_marker)
             raise
 
-    return _REGISTRY.send(prompt, name=name, worker_factory=worker_factory)
+    return REGISTRY.send(prompt, name=name, worker_factory=worker_factory)
 
 
-def _drain_agents() -> None:
+def drain_agents() -> None:
     """Synchronously close every background agent in this kernel (all registries).
 
     Invoked by the engine's teardown cascade as a cell executed in the kernel

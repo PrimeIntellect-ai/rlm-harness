@@ -73,7 +73,7 @@ def test_sweep_reclaims_dead_pid_markers(monkeypatch, tmp_path):
 
     proc = subprocess.Popen([sys.executable, "-c", ""])
     proc.wait()  # reaped -> pid is dead
-    stale = lim._markers_dir(lim.TOTAL) / f"{proc.pid}-deadbeef.marker"
+    stale = lim.pool_markers_dir(lim.TOTAL) / f"{proc.pid}-deadbeef.marker"
     stale.write_text(str(proc.pid))
 
     # cap is 2; after the stale marker is swept, live = 1 (m1), so there's room.

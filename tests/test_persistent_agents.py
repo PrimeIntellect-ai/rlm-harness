@@ -37,8 +37,8 @@ async def test_send_runs_named_agent(monkeypatch, tmp_path):
     assert handle.session_dir.name == "sub-probe"
     assert handle.session_dir.parent == tmp_path
 
-    await api._REGISTRY.close_all()
-    assert api._REGISTRY.get("probe") is None  # teardown clears the registry
+    await api.REGISTRY.close_all()
+    assert api.REGISTRY.get("probe") is None  # teardown clears the registry
 
 
 async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):
@@ -57,7 +57,7 @@ async def test_send_same_name_continues_conversation(monkeypatch, tmp_path):
     api.send("second", name="chat")  # continue: same engine + client
     assert (await handle.wait()).answer == "answer two"
 
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
@@ -82,7 +82,7 @@ async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
     assert h1.session_dir == h2.session_dir
     assert h2.session_dir.name == "sub-foo-bar"
 
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
@@ -124,10 +124,10 @@ async def test_send_respects_live_agent_cap(monkeypatch, tmp_path):
     api.send("more a", name="a")  # no raise (reuses a's slot)
 
     # teardown is the only thing that frees slots now; afterward a new agent starts
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
     h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
     assert (await h2.wait()).answer == "b1"
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 async def test_errored_agent_frees_its_total_slot(monkeypatch, tmp_path):
@@ -152,7 +152,7 @@ async def test_errored_agent_frees_its_total_slot(monkeypatch, tmp_path):
     # agent fits under the cap of 1 — no dismiss needed
     h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
     assert (await h2.wait()).answer == "b1"
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 async def test_construction_failure_frees_total_slot(monkeypatch, tmp_path):
@@ -173,7 +173,7 @@ async def test_construction_failure_frees_total_slot(monkeypatch, tmp_path):
     # the total slot taken in send() was freed, so a new agent fits under cap=1
     h2 = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
     assert (await h2.wait()).answer == "b1"
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 async def test_registration_failure_frees_total_slot(monkeypatch, tmp_path):
@@ -185,22 +185,22 @@ async def test_registration_failure_frees_total_slot(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
     from rlm import api
 
-    # Child-session creation raises *inside* _REGISTRY.send — after send() has
+    # Child-session creation raises *inside* REGISTRY.send — after send() has
     # already reserved the total slot, on the path the processor teardown can't
     # reach to release it.
     def _boom(name=None):
         raise OSError("boom")
 
-    original = api._child_session
-    monkeypatch.setattr(api, "_child_session", _boom)
+    original = api.child_session
+    monkeypatch.setattr(api, "child_session", _boom)
     with pytest.raises(OSError, match="boom"):
         api.send("task a", name="a")
-    monkeypatch.setattr(api, "_child_session", original)
+    monkeypatch.setattr(api, "child_session", original)
 
     # the reserved slot was released despite the failure, so a new agent fits (cap=1)
     h = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
     assert (await h.wait()).answer == "b1"
-    await api._REGISTRY.close_all()
+    await api.REGISTRY.close_all()
 
 
 async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):

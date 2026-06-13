@@ -25,9 +25,9 @@ REFUSAL_TEMPLATE = (
 )
 
 # Reuse the mini_swe_agent_plus separators verbatim so behavior matches.
-_SEPARATORS = re.compile(r"&&|\|\||;|\|")
+SEPARATORS = re.compile(r"&&|\|\||;|\|")
 
-_RESTRICTED_LOG_OPTIONS = {
+RESTRICTED_LOG_OPTIONS = {
     "--all",
     "-all",
     "--alternate-refs",
@@ -35,14 +35,14 @@ _RESTRICTED_LOG_OPTIONS = {
     "--walk-reflogs",
     "-g",
 }
-_RESTRICTED_LOG_OPTION_PREFIXES = (
+RESTRICTED_LOG_OPTION_PREFIXES = (
     "--branches",
     "--glob",
     "--remotes",
     "--tags",
 )
 
-_GIT_GLOBAL_OPTIONS_WITH_VALUE = {
+GIT_GLOBAL_OPTIONS_WITH_VALUE = {
     "-C",
     "-c",
     "--config-env",
@@ -66,8 +66,8 @@ def find_blocked_command(command: str) -> str | None:
     """
     if allow_git():
         return None
-    for segment in _SEPARATORS.split(command):
-        blocked = find_blocked_git_log_option(_split_segment(segment))
+    for segment in SEPARATORS.split(command):
+        blocked = find_blocked_git_log_option(split_segment(segment))
         if blocked is not None:
             return blocked
     return None
@@ -77,18 +77,18 @@ def refusal(cmd: str) -> str:
     return REFUSAL_TEMPLATE.format(cmd=cmd)
 
 
-def _split_segment(segment: str) -> list[str]:
+def split_segment(segment: str) -> list[str]:
     try:
         return shlex.split(segment)
     except ValueError:
         return segment.strip().split()
 
 
-def _is_git_binary(token: str) -> bool:
+def is_git_binary(token: str) -> bool:
     return token == "git" or token.rsplit("/", 1)[-1] == "git"
 
 
-def _skip_git_global_options(argv: list[str], index: int) -> int:
+def skip_git_global_options(argv: list[str], index: int) -> int:
     while index < len(argv):
         token = argv[index]
         if token == "--":
@@ -97,50 +97,50 @@ def _skip_git_global_options(argv: list[str], index: int) -> int:
             return index
 
         option = token.split("=", 1)[0]
-        if option in _GIT_GLOBAL_OPTIONS_WITH_VALUE and "=" not in token:
+        if option in GIT_GLOBAL_OPTIONS_WITH_VALUE and "=" not in token:
             index += 2
         else:
             index += 1
     return index
 
 
-def _is_restricted_log_option(token: str) -> bool:
-    if token in _RESTRICTED_LOG_OPTIONS:
+def is_restricted_log_option(token: str) -> bool:
+    if token in RESTRICTED_LOG_OPTIONS:
         return True
     return any(
         token == option or token.startswith(f"{option}=")
-        for option in _RESTRICTED_LOG_OPTION_PREFIXES
+        for option in RESTRICTED_LOG_OPTION_PREFIXES
     )
 
 
 def find_blocked_git_log_option(argv: list[str]) -> str | None:
-    if not argv or not _is_git_binary(argv[0]):
+    if not argv or not is_git_binary(argv[0]):
         return None
 
-    subcommand_index = _skip_git_global_options(argv, 1)
+    subcommand_index = skip_git_global_options(argv, 1)
     if subcommand_index >= len(argv) or argv[subcommand_index] != "log":
         return None
 
     for token in argv[subcommand_index + 1 :]:
         if token == "--":
             return None
-        if _is_restricted_log_option(token):
+        if is_restricted_log_option(token):
             return token
     return None
 
 
 # IPython shell-escape lines: ``!cmd`` and ``!!cmd``. Leading whitespace
 # is allowed (IPython accepts indented shell escapes inside blocks).
-_SHELL_ESCAPE_RE = re.compile(r"^\s*!{1,2}(?P<rest>.*)$")
+SHELL_ESCAPE_RE = re.compile(r"^\s*!{1,2}(?P<rest>.*)$")
 # ``%sx``, ``%system`` line magics and equivalents that shell out.
-_SHELL_LINE_MAGIC_RE = re.compile(r"^\s*%(?:sx|system)\s+(?P<rest>.*)$")
+SHELL_LINE_MAGIC_RE = re.compile(r"^\s*%(?:sx|system)\s+(?P<rest>.*)$")
 # ``%%bash`` / ``%%sh`` cell magic header — the whole cell body is shell.
-_SHELL_CELL_MAGIC_RE = re.compile(r"^\s*%%(?:bash|sh)\b")
+SHELL_CELL_MAGIC_RE = re.compile(r"^\s*%%(?:bash|sh)\b")
 # Any IPython line magic — used by the AST pre-pass to drop ipython-only
 # lines so ``ast.parse`` doesn't choke on them.
-_ANY_LINE_MAGIC_RE = re.compile(r"^\s*%[A-Za-z]")
+ANY_LINE_MAGIC_RE = re.compile(r"^\s*%[A-Za-z]")
 # Any IPython cell magic header — same purpose.
-_ANY_CELL_MAGIC_RE = re.compile(r"^\s*%%[A-Za-z]")
+ANY_CELL_MAGIC_RE = re.compile(r"^\s*%%[A-Za-z]")
 
 
 def find_blocked_in_ipython(code: str) -> str | None:
@@ -167,10 +167,10 @@ def find_blocked_in_ipython(code: str) -> str | None:
             if blocked is not None:
                 return blocked
             continue
-        if _SHELL_CELL_MAGIC_RE.match(line):
+        if SHELL_CELL_MAGIC_RE.match(line):
             in_bash_cell = True
             continue
-        m = _SHELL_ESCAPE_RE.match(line) or _SHELL_LINE_MAGIC_RE.match(line)
+        m = SHELL_ESCAPE_RE.match(line) or SHELL_LINE_MAGIC_RE.match(line)
         if m:
             blocked = find_blocked_command(m.group("rest"))
             if blocked is not None:
@@ -181,7 +181,7 @@ def find_blocked_in_ipython(code: str) -> str | None:
 
 # Statically-resolved fully-qualified callees that shell out when invoked
 # with a literal first positional argument.
-_BLOCKED_PY_CALLS = frozenset(
+BLOCKED_PY_CALLS = frozenset(
     {
         "subprocess.run",
         "subprocess.call",
@@ -194,7 +194,7 @@ _BLOCKED_PY_CALLS = frozenset(
 )
 
 
-def _blocked_option_from_python_call(node: ast.Call) -> str | None:
+def blocked_option_from_python_call(node: ast.Call) -> str | None:
     if not node.args:
         return None
     arg = node.args[0]
@@ -241,7 +241,7 @@ class _GitCallFinder(ast.NodeVisitor):
         if node.module in {"subprocess", "os"}:
             for alias in node.names:
                 fqn = f"{node.module}.{alias.name}"
-                if fqn in _BLOCKED_PY_CALLS:
+                if fqn in BLOCKED_PY_CALLS:
                     self.callable_aliases[alias.asname or alias.name] = fqn
         self.generic_visit(node)
 
@@ -255,7 +255,7 @@ class _GitCallFinder(ast.NodeVisitor):
             module = self.module_aliases.get(node.value.value.id)
             if module is not None:
                 fqn = f"{module}.{node.value.attr}"
-        if fqn in _BLOCKED_PY_CALLS:
+        if fqn in BLOCKED_PY_CALLS:
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     self.callable_aliases[target.id] = fqn
@@ -263,8 +263,8 @@ class _GitCallFinder(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         fqn = self._resolve_callee(node.func)
-        if fqn in _BLOCKED_PY_CALLS:
-            blocked = _blocked_option_from_python_call(node)
+        if fqn in BLOCKED_PY_CALLS:
+            blocked = blocked_option_from_python_call(node)
             if blocked is not None:
                 self.found = blocked
         self.generic_visit(node)
@@ -280,7 +280,7 @@ class _GitCallFinder(ast.NodeVisitor):
         return None
 
 
-def _strip_ipython_only(code: str) -> str:
+def strip_ipython_only(code: str) -> str:
     """Drop ipython-only lines so the remainder is pure Python for ``ast.parse``.
 
     Removes ``!cmd`` / ``!!cmd`` shell escapes, line magics (``%foo``),
@@ -298,9 +298,9 @@ def _strip_ipython_only(code: str) -> str:
         # Bash-bodied magics (``%%bash`` / ``%%sh``) are caught earlier
         # by the shell-escape pre-pass, so dropping just the header here
         # is safe.
-        if _ANY_CELL_MAGIC_RE.match(line):
+        if ANY_CELL_MAGIC_RE.match(line):
             continue
-        if _SHELL_ESCAPE_RE.match(line) or _ANY_LINE_MAGIC_RE.match(line):
+        if SHELL_ESCAPE_RE.match(line) or ANY_LINE_MAGIC_RE.match(line):
             continue
         stripped = line.rstrip()
         if stripped.endswith("?"):
@@ -321,7 +321,7 @@ def find_blocked_python(code: str) -> str | None:
     if allow_git():
         return None
     try:
-        tree = ast.parse(_strip_ipython_only(code))
+        tree = ast.parse(strip_ipython_only(code))
     except SyntaxError:
         return None
     finder = _GitCallFinder()

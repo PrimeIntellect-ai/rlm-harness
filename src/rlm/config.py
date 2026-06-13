@@ -39,23 +39,23 @@ DEFAULT_AGENT_WAIT_TIMEOUT = 300.0
 DEFAULT_SDK_MAX_RETRIES = 5
 
 
-def _int(name: str, default: int) -> int:
+def env_int(name: str, default: int) -> int:
     """Int from env; missing → ``default``. Malformed raises (loud misconfig)."""
     raw = os.environ.get(name)
     return default if raw is None else int(raw)
 
 
-def _positive_or_none(name: str) -> int | None:
+def positive_or_none(name: str) -> int | None:
     """``int(env)`` if positive, else ``None`` (missing / ``0`` / negative).
 
     Strict: a malformed value raises. Used for budgets, which have no
     "disabled on bad input" contract.
     """
-    value = _int(name, 0)
+    value = env_int(name, 0)
     return value if value > 0 else None
 
 
-def _cap(name: str) -> int | None:
+def cap(name: str) -> int | None:
     """Live-agent cap from env: a positive int enables it, anything else disables.
 
     Tolerant by contract — a cap is "active only when a positive int, otherwise
@@ -73,7 +73,7 @@ def _cap(name: str) -> int | None:
     return value if value > 0 else None
 
 
-def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
+def parse_summarize_at_tokens(value: int | str | None) -> int | None:
     """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
 
     Accepts ``None`` / empty string (disabled), an ``int``, or a numeric ``str``
@@ -101,7 +101,7 @@ def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
     return parsed
 
 
-def _agent_wait_timeout() -> float | None:
+def agent_wait_timeout() -> float | None:
     """Seconds to wait for a slot before proceeding over the cap; ``0`` → forever.
 
     Tolerant like the caps: missing / empty / malformed → the default, so a bad
@@ -155,33 +155,33 @@ class Config:
     allow_git: bool
 
 
-def _build() -> Config:
-    max_output = _int("RLM_MAX_OUTPUT", -1)
+def build() -> Config:
+    max_output = env_int("RLM_MAX_OUTPUT", -1)
     if max_output == 0:
         raise ValueError(
             "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
         )
     return Config(
         model=os.environ.get("RLM_MODEL", DEFAULT_MODEL),
-        max_tokens=_positive_or_none("RLM_MAX_TOKENS"),
-        sub_max_tokens=_positive_or_none("RLM_SUB_MAX_TOKENS"),
-        summarize_at_tokens=_parse_summarize_at_tokens(
+        max_tokens=positive_or_none("RLM_MAX_TOKENS"),
+        sub_max_tokens=positive_or_none("RLM_SUB_MAX_TOKENS"),
+        summarize_at_tokens=parse_summarize_at_tokens(
             os.environ.get("RLM_SUMMARIZE_AT_TOKENS")
         ),
-        depth=_int("RLM_DEPTH", 0),
-        max_depth=_int("RLM_MAX_DEPTH", 0),
+        depth=env_int("RLM_DEPTH", 0),
+        max_depth=env_int("RLM_MAX_DEPTH", 0),
         session_dir=os.environ.get("RLM_SESSION_DIR"),
-        exec_timeout=_int("RLM_EXEC_TIMEOUT", DEFAULT_EXEC_TIMEOUT),
+        exec_timeout=env_int("RLM_EXEC_TIMEOUT", DEFAULT_EXEC_TIMEOUT),
         max_output=max_output,
-        max_tool_output_chars=_int("RLM_MAX_TOOL_OUTPUT_CHARS", -1),
+        max_tool_output_chars=env_int("RLM_MAX_TOOL_OUTPUT_CHARS", -1),
         system_prompt_path=os.environ.get("RLM_SYSTEM_PROMPT_PATH"),
         append_to_system_prompt=os.environ.get("RLM_APPEND_TO_SYSTEM_PROMPT"),
-        max_live_agents=_cap("RLM_MAX_LIVE_AGENTS"),
-        max_running_agents=_cap("RLM_MAX_RUNNING_AGENTS"),
-        agent_wait_timeout=_agent_wait_timeout(),
+        max_live_agents=cap("RLM_MAX_LIVE_AGENTS"),
+        max_running_agents=cap("RLM_MAX_RUNNING_AGENTS"),
+        agent_wait_timeout=agent_wait_timeout(),
         live_agents_dir=os.environ.get("RLM_LIVE_AGENTS_DIR"),
         home=Path(os.environ.get("RLM_HOME") or Path.home() / ".rlm"),
-        sdk_max_retries=_int("RLM_SDK_MAX_RETRIES", DEFAULT_SDK_MAX_RETRIES),
+        sdk_max_retries=env_int("RLM_SDK_MAX_RETRIES", DEFAULT_SDK_MAX_RETRIES),
         allow_git=os.environ.get("RLM_ALLOW_GIT") == "1",
     )
 
@@ -189,7 +189,7 @@ def _build() -> Config:
 @lru_cache(maxsize=1)
 def load_config() -> Config:
     """Load (and cache) the process-wide config from the environment."""
-    return _build()
+    return build()
 
 
 def get_config() -> Config:

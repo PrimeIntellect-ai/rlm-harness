@@ -50,7 +50,7 @@ IPYTHON_SCHEMA = {
     },
 }
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 IPYTHON_TIMEOUT_MAX_SECONDS = 600
 
 
@@ -279,7 +279,7 @@ globals().update(_build_namespace({installed_skills!r}, {allow_recursion!r}))
                         outputs.append(text + "\n")
                 elif msg_type == "error":
                     tb = "\n".join(content.get("traceback", []))
-                    tb = _ANSI_RE.sub("", tb)
+                    tb = ANSI_RE.sub("", tb)
                     outputs.append(tb)
                 elif msg_type == "status" and content["execution_state"] == "idle":
                     break

@@ -50,10 +50,10 @@ def main():
     if args.prompt:
         print(asyncio.run(rlm.run(args.prompt)).answer)
     else:
-        _run_interactive()
+        run_interactive()
 
 
-def _run_interactive():
+def run_interactive():
     print("rlm interactive mode")
     print('TUI not yet implemented. Use: rlm "your prompt" for headless mode.')
     sys.exit(0)

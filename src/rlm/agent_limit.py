@@ -45,22 +45,22 @@ class AgentLimitReached(RuntimeError):
 TOTAL = "total"
 RUNNING = "running"
 # Pool -> (Config attribute holding its limit, markers subdir name).
-_POOLS = {
+POOLS = {
     TOTAL: ("max_live_agents", "total"),
     RUNNING: ("max_running_agents", "running"),
 }
 
 
-def _limit(pool: str) -> int | None:
-    return getattr(get_config(), _POOLS[pool][0])
+def pool_limit(pool: str) -> int | None:
+    return getattr(get_config(), POOLS[pool][0])
 
 
-def _markers_dir(pool: str) -> Path | None:
+def pool_markers_dir(pool: str) -> Path | None:
     raw = get_config().live_agents_dir
-    return Path(raw) / _POOLS[pool][1] if raw else None
+    return Path(raw) / POOLS[pool][1] if raw else None
 
 
-def _pid_alive(pid: int) -> bool:
+def pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -70,7 +70,7 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _live_markers(markers_dir: Path) -> list[Path]:
+def live_markers(markers_dir: Path) -> list[Path]:
     """Return live marker paths, unlinking any owned by a dead/garbage PID."""
     live: list[Path] = []
     for marker in markers_dir.glob("*.marker"):
@@ -80,14 +80,14 @@ def _live_markers(markers_dir: Path) -> list[Path]:
         except ValueError:
             marker.unlink(missing_ok=True)
             continue
-        if _pid_alive(pid):
+        if pid_alive(pid):
             live.append(marker)
         else:
             marker.unlink(missing_ok=True)
     return live
 
 
-def _make_marker(markers_dir: Path) -> Path:
+def make_marker(markers_dir: Path) -> Path:
     """Create and return one ``<pid>-<uuid>.marker`` file in ``markers_dir``."""
     marker = markers_dir / f"{os.getpid()}-{uuid.uuid4().hex}.marker"
     marker.write_text(str(os.getpid()))
@@ -101,17 +101,17 @@ def acquire_slot(pool: str) -> tuple[bool, Path | None]:
     reached. ``marker`` is the file to hand to :func:`release_slot` (``None`` when
     the cap is disabled, so callers can release unconditionally).
     """
-    limit = _limit(pool)
-    markers_dir = _markers_dir(pool)
+    limit = pool_limit(pool)
+    markers_dir = pool_markers_dir(pool)
     if limit is None or markers_dir is None or fcntl is None:
         return True, None
     markers_dir.mkdir(parents=True, exist_ok=True)
     with open(markers_dir / ".lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            if len(_live_markers(markers_dir)) >= limit:
+            if len(live_markers(markers_dir)) >= limit:
                 return False, None
-            return True, _make_marker(markers_dir)
+            return True, make_marker(markers_dir)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
@@ -122,7 +122,7 @@ def release_slot(marker: Path | None) -> None:
         Path(marker).unlink(missing_ok=True)
 
 
-_WAIT_POLL_INTERVAL = 0.25
+WAIT_POLL_INTERVAL = 0.25
 
 
 async def acquire_slot_blocking(pool: str) -> Path | None:
@@ -140,7 +140,7 @@ async def acquire_slot_blocking(pool: str) -> Path | None:
     timeout = get_config().agent_wait_timeout
     start = time.monotonic()
     while True:
-        await asyncio.sleep(_WAIT_POLL_INTERVAL)
+        await asyncio.sleep(WAIT_POLL_INTERVAL)
         granted, marker = acquire_slot(pool)
         if granted:
             return marker
@@ -150,8 +150,8 @@ async def acquire_slot_blocking(pool: str) -> Path | None:
                 pool,
                 timeout,
             )
-            markers_dir = _markers_dir(pool)
+            markers_dir = pool_markers_dir(pool)
             if markers_dir is None or fcntl is None:
                 return None
             markers_dir.mkdir(parents=True, exist_ok=True)
-            return _make_marker(markers_dir)
+            return make_marker(markers_dir)

@@ -62,7 +62,7 @@ The background layer rests on properties the IPython tool already provides:
   (`await asyncio.gather(rlm(a), rlm(b))`) already works. The new capability is
   cross-cell lifecycle.
 - **Startup injection** (`_inject_startup`): wraps each skill and a callable
-  `rlm` into the namespace (`_wrap_callable` makes a module `await`-callable →
+  `rlm` into the namespace (`wrap_callable` makes a module `await`-callable →
   `mod.run(...)`) and sets `RLM_SESSION_DIR` / `RLM_DEPTH` / `RLM_LIVE_AGENTS_DIR`
   for child sessions.
 - **Sessions** (`session.py`): nested `sub-<name>/` dirs, each with `meta.json` +
@@ -255,7 +255,7 @@ a restart; the conversation itself is unaffected (it lives in the engine, not th
 kernel).
 
 **Resume from disk after a parent-kernel restart.** A sub-agent's `RLMEngine`
-lives in its *parent's* kernel process, alongside `rlm.api._REGISTRY`. If the
+lives in its *parent's* kernel process, alongside `rlm.api.REGISTRY`. If the
 parent kernel restarts, the registry and every in-memory engine are gone, but the
 `sub-<name>/` dirs persist. Re-sending a name must continue that agent, not
 silently start fresh on top of its old transcript. So when `send(name=X)` builds

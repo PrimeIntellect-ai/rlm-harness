@@ -24,7 +24,7 @@ import types
 from rlm.async_runtime import attach_background
 
 
-def _log_programmatic_call(tool_name: str, source: str) -> None:
+def log_programmatic_call(tool_name: str, source: str) -> None:
     """Append one programmatic-tool-call record to the session log.
 
     Matches the line format written by ``install.sh``'s bash wrapper so
@@ -56,7 +56,7 @@ class _CallableModule(types.ModuleType):
         return await self.run(*args, **kwargs)
 
 
-def _wrap_callable(mod, log_source: str | None):
+def wrap_callable(mod, log_source: str | None):
     """Return an await-callable clone of ``mod`` that exposes its ``run`` API.
 
     ``log_source`` is ``'python'`` for skills (each call is logged to
@@ -70,7 +70,7 @@ def _wrap_callable(mod, log_source: str | None):
 
         @functools.wraps(_original_run)
         async def _logged_run(*args, **kwargs):
-            _log_programmatic_call(mod.__name__, log_source)
+            log_programmatic_call(mod.__name__, log_source)
             return await _original_run(*args, **kwargs)
 
         wrapped.run = _logged_run
@@ -92,9 +92,9 @@ def build_namespace(installed_skills: list[str], allow_recursion: bool) -> dict:
     """
     namespace: dict = {}
     for name in installed_skills:
-        skill = _wrap_callable(__import__(name), "python")
+        skill = wrap_callable(__import__(name), "python")
         attach_background(skill, skill.run)
         namespace[name] = skill
     if allow_recursion:
-        namespace["rlm"] = _wrap_callable(__import__("rlm"), None)
+        namespace["rlm"] = wrap_callable(__import__("rlm"), None)
     return namespace

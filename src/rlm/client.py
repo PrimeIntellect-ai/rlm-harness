@@ -16,7 +16,7 @@ from openai import (
 from rlm.config import get_config
 from rlm.types import TokenUsage
 
-_RETRYABLE: tuple[type[BaseException], ...] = (
+RETRYABLE: tuple[type[BaseException], ...] = (
     APIConnectionError,
     APITimeoutError,
     InternalServerError,
@@ -25,7 +25,7 @@ _RETRYABLE: tuple[type[BaseException], ...] = (
 )
 
 # Widely-spaced delays (seconds) between attempts; total ~5 min wall budget.
-_RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
+RETRY_DELAYS: tuple[int, ...] = (15, 30, 60, 90, 120)
 
 
 PI_INFERENCE_BASE_URL = "https://api.pinference.ai/api/v1"
@@ -89,10 +89,10 @@ async def call_with_retries(
     Extends the SDK's retry set with ``NotFoundError`` to ride out intermittent
     tunnel/proxy 404s that the SDK itself does not retry.
     """
-    for delay in _RETRY_DELAYS:
+    for delay in RETRY_DELAYS:
         try:
             return await func(**kwargs)
-        except _RETRYABLE:
+        except RETRYABLE:
             await asyncio.sleep(delay)
     return await func(**kwargs)
 

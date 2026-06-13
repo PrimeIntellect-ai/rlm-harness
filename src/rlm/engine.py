@@ -13,7 +13,7 @@ from pathlib import Path
 from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
-from rlm.config import Config, _parse_summarize_at_tokens, load_config, with_overrides
+from rlm.config import Config, parse_summarize_at_tokens, load_config, with_overrides
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -32,7 +32,7 @@ from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
 # Wall-clock budget for the teardown drain cell (close_all_registries running in
 # the kernel where the child registries live). Bounds how long a wedged child can
 # stall a parent's teardown.
-_DRAIN_TIMEOUT_SECONDS = 120
+DRAIN_TIMEOUT_SECONDS = 120
 
 
 # Injected as a user message when the branch's context size reaches the
@@ -83,13 +83,13 @@ KERNEL_RESET_RESUME_WARNING = (
 )
 
 
-def _is_request_too_large(e: BadRequestError) -> bool:
+def is_request_too_large(e: BadRequestError) -> bool:
     """True if a 400 matches the proxy's "Request Entity Too Large" body."""
     haystack = f"{e} {getattr(e, 'body', '') or ''}".lower()
     return "request entity too large" in haystack
 
 
-def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
+def parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     """Parse a tool-call arguments blob. Returns (args, error_info).
 
     On success, args is the parsed dict and error_info is None.
@@ -144,7 +144,7 @@ class RLMEngine:
             append_to_system_prompt=append_to_system_prompt,
             max_tokens=max_tokens,
             summarize_at_tokens=(
-                _parse_summarize_at_tokens(summarize_at_tokens)
+                parse_summarize_at_tokens(summarize_at_tokens)
                 if summarize_at_tokens is not None
                 else None
             ),
@@ -366,7 +366,7 @@ class RLMEngine:
             try:
                 response = await self._request_completion(messages, active_tools)
             except BadRequestError as e:
-                if not _is_request_too_large(e):
+                if not is_request_too_large(e):
                     raise
                 self._metrics.stop_reason = "request_too_large"
                 final_text = "[request body too large]"
@@ -442,7 +442,7 @@ class RLMEngine:
                 try:
                     await self._compact_branch(messages, turn, active_tools)
                 except BadRequestError as e:
-                    if not _is_request_too_large(e):
+                    if not is_request_too_large(e):
                         raise
                     self._metrics.stop_reason = "request_too_large"
                     final_text = "[request body too large]"
@@ -529,7 +529,7 @@ class RLMEngine:
         parsed_args: list[dict | None] = []
         tool_calls_log: list[dict] = []
         for tc in msg.tool_calls:
-            args, err = _parse_tool_call_args(tc.function.arguments)
+            args, err = parse_tool_call_args(tc.function.arguments)
             parsed_args.append(args)
             tool_calls_log.append(
                 {"name": tc.function.name, "args": err if args is None else args}
@@ -586,8 +586,8 @@ class RLMEngine:
                         # this agent's loop (and its siblings) meanwhile.
                         await asyncio.to_thread(
                             self._repl.execute,
-                            "import rlm.api as _rlm; _rlm._drain_agents()",
-                            timeout=_DRAIN_TIMEOUT_SECONDS,
+                            "import rlm.api as _rlm; _rlm.drain_agents()",
+                            timeout=DRAIN_TIMEOUT_SECONDS,
                         )
                     except Exception:
                         logging.getLogger(__name__).warning(
@@ -631,7 +631,7 @@ class RLMEngine:
         # checkpoint prompt — otherwise the prompt's own chars get
         # counted as "dropped conversation content", inflating the
         # metric and the session log's dropped_chars field.
-        dropped_chars = _count_messages_chars(messages[2:])
+        dropped_chars = count_messages_chars(messages[2:])
         turns_since_last = turn + 1 - self._branch_start_turn
 
         # Append the checkpoint prompt and ask the model for a text-only
@@ -730,7 +730,7 @@ class RLMEngine:
         )
 
 
-def _count_messages_chars(messages: list[dict]) -> int:
+def count_messages_chars(messages: list[dict]) -> int:
     """Sum the content-char length across ``messages`` (text + tool-call args).
 
     Used as a rough "how much was dropped" metric on compaction. Tool-call
@@ -739,19 +739,19 @@ def _count_messages_chars(messages: list[dict]) -> int:
     """
     total = 0
     for message in messages:
-        total += _content_chars(message.get("content"))
+        total += content_chars(message.get("content"))
         tool_calls = message.get("tool_calls")
         if isinstance(tool_calls, list):
             for tc in tool_calls:
-                total += _tool_call_chars(tc)
+                total += tool_call_chars(tc)
     return total
 
 
-def _content_chars(content) -> int:
+def content_chars(content) -> int:
     if isinstance(content, str):
         return len(content)
     if isinstance(content, list):
-        return sum(_content_chars(item) for item in content)
+        return sum(content_chars(item) for item in content)
     if isinstance(content, dict):
         total = 0
         for field_name in ("text", "input_text", "output_text"):
@@ -760,12 +760,12 @@ def _content_chars(content) -> int:
                 total += len(value)
         nested = content.get("content")
         if nested is not None:
-            total += _content_chars(nested)
+            total += content_chars(nested)
         return total
     return 0
 
 
-def _tool_call_chars(tool_call) -> int:
+def tool_call_chars(tool_call) -> int:
     if isinstance(tool_call, dict):
         function = tool_call.get("function")
     else:

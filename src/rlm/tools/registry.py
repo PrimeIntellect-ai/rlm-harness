@@ -10,15 +10,15 @@ from rlm.tools.edit import EditTool
 from rlm.tools.ipython import IpythonTool
 
 
-_BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (
+BUILTIN_TOOLS: tuple[BuiltinTool, ...] = (
     IpythonTool(),
     BashTool(),
     EditTool(),
 )
-_TOOLS_BY_NAME: dict[str, BuiltinTool] = {tool.name: tool for tool in _BUILTIN_TOOLS}
+TOOLS_BY_NAME: dict[str, BuiltinTool] = {tool.name: tool for tool in BUILTIN_TOOLS}
 
 
-def _active_tool_names() -> list[str]:
+def active_tool_names() -> list[str]:
     """Resolve the active builtin-tool names from the ``RLM_TOOLS`` env var.
 
     Unset → ``["ipython"]`` (convenience default for direct CLI use; all
@@ -38,23 +38,23 @@ def _active_tool_names() -> list[str]:
         name = token.strip()
         if name and name not in names:
             names.append(name)
-    unknown = [n for n in names if n not in _TOOLS_BY_NAME]
+    unknown = [n for n in names if n not in TOOLS_BY_NAME]
     if unknown:
         raise ValueError(
             f"RLM_TOOLS contains unknown tool(s): {unknown}. "
-            f"Available: {sorted(_TOOLS_BY_NAME)}"
+            f"Available: {sorted(TOOLS_BY_NAME)}"
         )
     return names
 
 
 def get_active_builtin_tools() -> list[BuiltinTool]:
     """Return active builtin-tool instances (respects ``RLM_TOOLS``)."""
-    return [_TOOLS_BY_NAME[name] for name in _active_tool_names()]
+    return [TOOLS_BY_NAME[name] for name in active_tool_names()]
 
 
 def is_tool_active(name: str) -> bool:
     """Return whether ``name`` is in the active builtin-tool set."""
-    return name in _active_tool_names()
+    return name in active_tool_names()
 
 
 def get_active_tools() -> list[dict]:
@@ -68,6 +68,6 @@ def get_builtin_tool(name: str) -> BuiltinTool | None:
     Returns None for unknown names or tools excluded by ``RLM_TOOLS``, so
     the engine's unknown-tool error path catches both cases identically.
     """
-    if name not in _active_tool_names():
+    if name not in active_tool_names():
         return None
-    return _TOOLS_BY_NAME.get(name)
+    return TOOLS_BY_NAME.get(name)

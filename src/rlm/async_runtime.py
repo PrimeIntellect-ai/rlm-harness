@@ -27,7 +27,7 @@ RUNNING = "running"
 FINISHED = "finished"  # idle: inbox empty, ready for more
 ERROR = "error"
 
-_NO_ITEM = object()  # omitted from BackgroundWorker(item=...) -> resident worker
+NO_ITEM = object()  # omitted from BackgroundWorker(item=...) -> resident worker
 
 
 @dataclass
@@ -102,7 +102,7 @@ class BackgroundWorker:
         processor: Processor,
         *,
         session_dir: Path | None = None,
-        item: Any = _NO_ITEM,
+        item: Any = NO_ITEM,
     ):
         self.name = name
         self.session_dir = session_dir
@@ -116,7 +116,7 @@ class BackgroundWorker:
         # sends until close(); an ephemeral worker (general tool) is created with
         # its one item and ends as soon as the inbox drains — it lives only as
         # long as its Handle, never registered, so it's GC'd when dropped.
-        self._ephemeral = item is not _NO_ITEM
+        self._ephemeral = item is not NO_ITEM
         self.queued: list = [item] if self._ephemeral else []
         self._status = RUNNING if self._ephemeral else FINISHED
         self._task: asyncio.Future = asyncio.ensure_future(self._drain())
@@ -226,12 +226,12 @@ class Handle:
         return f"Handle(name={self._worker.name!r}, status={self._worker.status!r})"
 
 
-_ALL_REGISTRIES: "weakref.WeakSet[Registry]" = weakref.WeakSet()
+ALL_REGISTRIES: "weakref.WeakSet[Registry]" = weakref.WeakSet()
 
 
 async def close_all_registries() -> None:
     """Gracefully close every live registry's workers (used on kernel teardown)."""
-    for registry in list(_ALL_REGISTRIES):
+    for registry in list(ALL_REGISTRIES):
         await registry.close_all()
 
 
@@ -240,7 +240,7 @@ class Registry:
 
     def __init__(self):
         self._workers: dict[str, BackgroundWorker] = {}
-        _ALL_REGISTRIES.add(self)
+        ALL_REGISTRIES.add(self)
 
     def get(self, name: str) -> Handle | None:
         worker = self._workers.get(name)

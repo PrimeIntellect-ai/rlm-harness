@@ -177,8 +177,8 @@ def session(tmp_path):
 def register_fixture_tools():
     """Session-wide: fixture tools join the builtin registry alongside ipython/summarize/bash/edit."""
     mp = pytest.MonkeyPatch()
-    mp.setitem(tool_registry._TOOLS_BY_NAME, "add", AddTool())
-    mp.setitem(tool_registry._TOOLS_BY_NAME, "boom", BoomTool())
+    mp.setitem(tool_registry.TOOLS_BY_NAME, "add", AddTool())
+    mp.setitem(tool_registry.TOOLS_BY_NAME, "boom", BoomTool())
     yield
     mp.undo()
 
