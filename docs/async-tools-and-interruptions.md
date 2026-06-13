@@ -163,23 +163,31 @@ system-prompt line carry the "`send` to a stateless skill = one background call;
 Ship a helper module `rlm/_async_runtime.py`, imported by `_inject_startup` —
 **not** inlined into the `setup_code` f-string (testable, maintainable).
 
-- A **worker** per name owns an inbox (deque) and drains it **sequentially** as
-  one asyncio task on the kernel loop. Generic and tool-agnostic.
-- A **processor** parameterizes "process one queued item" — this is how
-  "continuation is up to the tool":
-  - default (stateless): `await tool.run(item)`, push the return value to
+- A **worker** runs a **processor** and exposes its state via a `Handle`. Two
+  lifecycles:
+  - **Resident** (named rlm agents): owns an inbox (deque) and drains it
+    **sequentially** as one long-lived asyncio task; stays alive until `close()`
+    and is held by the registry so a re-sent name continues it.
+  - **Ephemeral** (general tools): runs one call to completion, then the task
+    ends. Owned solely by its `Handle` — never registered — so it and its result
+    are GC'd once the model drops the handle. A tool that wants state across
+    calls keeps its own cache; the runtime never persists it.
+- A **processor** parameterizes "process one item" — this is how "continuation
+  is up to the tool":
+  - stateless (general tools): `await tool.run(item)`, push the return value to
     `results`.
   - `rlm` (stateful): `await engine.advance(prompt)` on a live engine (§3.3).
 - A **Handle** wraps the worker; `poll()` builds a `ToolState` from worker state;
-  the drain loop stores each result/exception so nothing becomes an
-  unretrieved-exception warning.
-- A module-level **registry** (per kernel) holds workers by name with **strong
-  refs** (asyncio won't keep tasks alive otherwise). Per-kernel ⇒ hierarchical:
-  each agent owns the registry of the children *it* spawned; nesting is
-  naturally recursive, no global registry.
+  results/exceptions are stored so nothing becomes an unretrieved-exception
+  warning.
+- A module-level **registry** (per kernel) holds the **resident** (named rlm)
+  workers with **strong refs** (asyncio won't keep a parked task alive
+  otherwise). Per-kernel ⇒ hierarchical: each agent owns the registry of the
+  children *it* spawned; nesting is naturally recursive, no global registry.
+  General tools never touch the registry.
 
-This layer alone (with the default stateless processor) delivers offloading +
-queueing for skills.
+This layer delivers persistent rlm agents (resident workers + registry) and
+offloading for skills (ephemeral workers, no accumulation).
 
 ### 3.3 Resumable engine (rlm's stateful processor)
 
@@ -209,8 +217,10 @@ queueing for skills.
 - `poll().status` stays `running` while draining; `poll().queued` exposes depth
   and is directly editable.
 - Each queued item's result lands in `results` in order.
-- The "send to a stateless tool twice" case is just a 2-item queue processed
-  serially (two independent `run`s).
+- Queueing applies to a **named rlm agent** (re-`send` the name → its inbox
+  grows, drained serially). General tools aren't registered, so each `send` is
+  its own ephemeral worker; two sends to one skill run **concurrently**, not
+  queued.
 
 ### 3.5 Session layout
 

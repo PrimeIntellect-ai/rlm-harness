@@ -170,3 +170,10 @@ async def test_attach_background_adds_send():
 
     assert await mod.send(41).wait() == 42  # forwards positional args
     assert await mod.send(10, plus=5).wait() == 15  # forwards kwargs
+
+    # ephemeral: a send is a standalone worker that runs once and ends — it is
+    # not held in any registry, so it's GC'd once the handle is dropped.
+    handle = mod.send(7)
+    assert await handle.wait() == 8
+    await asyncio.sleep(0)
+    assert handle._worker._task.done()

@@ -26,6 +26,8 @@ RUNNING = "running"
 FINISHED = "finished"  # idle: inbox empty, ready for more
 ERROR = "error"
 
+_NO_ITEM = object()  # omitted from BackgroundWorker(item=...) -> resident worker
+
 
 @dataclass
 class ToolState:
@@ -98,18 +100,28 @@ class BackgroundWorker:
         processor: Processor,
         *,
         session_dir: Path | None = None,
+        item: Any = _NO_ITEM,
     ):
         self.name = name
         self.session_dir = session_dir
         self.queued: list = []
         self.results: deque = deque()
         self._processor = processor
-        self._status = FINISHED
         self._error: BaseException | None = None
         self._wake = asyncio.Event()
         self._progress = asyncio.Event()
         self._closing = False
-        self._task: asyncio.Future = asyncio.ensure_future(self._drain())
+        if item is _NO_ITEM:
+            # Resident worker (named rlm agent): drains an inbox across
+            # successive sends; stays alive until close().
+            self._status = FINISHED
+            self._task: asyncio.Future = asyncio.ensure_future(self._drain())
+        else:
+            # Ephemeral worker (general tool): runs one call to completion, then
+            # the task ends. Owned solely by its Handle — never registered — so
+            # it and its result are GC'd once the model drops the handle.
+            self._status = RUNNING
+            self._task = asyncio.ensure_future(self._run_once(item))
 
     @property
     def status(self) -> str:
@@ -150,6 +162,20 @@ class BackgroundWorker:
                 return
             self.results.append(result)
             self._progress.set()
+
+    async def _run_once(self, item: Any) -> None:
+        """Run one item to completion for an ephemeral worker, then end."""
+        try:
+            result = await self._processor.process(item)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # surfaced to the model via poll()/wait()
+            self._error = exc
+            self._status = ERROR
+        else:
+            self.results.append(result)
+            self._status = FINISHED
+        self._progress.set()
 
     async def wait(self) -> Any:
         """Await and return the next result (consumes it); raise if the worker errors."""
@@ -271,19 +297,17 @@ class Registry:
 def attach_background(module, run_callable):
     """Give a wrapped callable module a stateless ``.send(*a, **kw) -> Handle``.
 
-    ``send`` runs ``run_callable(*a, **kw)`` on a background worker (auto-named,
-    no persistence, no live-agent cap — skills are cheap coroutines, not
-    kernels). The model holds the returned handle and polls it. Used to give
-    uploaded skills the same background/poll lifecycle as sub-agents.
+    Each ``send`` runs ``run_callable(*a, **kw)`` on its own ephemeral worker and
+    returns a handle. The worker runs the call once and ends; it is not
+    registered, so it and its result live only as long as the model holds the
+    handle. A tool that wants state across calls keeps its own cache.
     """
-    registry = Registry()
 
     def send(*args, **kwargs):
-        return registry.send(
-            (args, kwargs),
-            name=None,
-            processor_factory=lambda _name: FnProcessor(run_callable),
+        worker = BackgroundWorker(
+            uuid.uuid4().hex, FnProcessor(run_callable), item=(args, kwargs)
         )
+        return Handle(worker)
 
     module.send = send
     return module
