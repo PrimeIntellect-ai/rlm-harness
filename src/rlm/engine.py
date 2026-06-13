@@ -158,7 +158,11 @@ class RLMEngine:
         self.append_to_system_prompt = self.config.append_to_system_prompt
         self.max_depth = self.config.max_depth
         self.depth = self.config.depth
-        self.max_tokens = self.config.max_tokens
+        # Non-positive budgets mean "no limit" (matching the env path, where
+        # RLM_MAX_TOKENS <= 0 -> None), so a stray 0 / negative kwarg can't disable
+        # the check by truthiness or stop the agent immediately (B7).
+        mt = self.config.max_tokens
+        self.max_tokens = mt if mt and mt > 0 else None
 
         self.client = client or make_client()
         self.session = session
@@ -245,9 +249,9 @@ class RLMEngine:
             self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
-        prior = self.session.load_latest_view()
+        latest_view, prior = self.session.load_latest_view()
         if prior:
-            self._resume(prior)
+            self._resume(latest_view, prior)
         else:
             messages_path = str(self.session.dir / "messages.jsonl")
             system_prompt = self._load_system_prompt(
@@ -280,7 +284,7 @@ class RLMEngine:
             metrics_state=self._metrics.snapshot(),
         )
 
-    def _resume(self, prior_messages: list[dict]) -> None:
+    def _resume(self, view: int, prior_messages: list[dict]) -> None:
         """Continue an agent whose in-memory engine was lost to a kernel restart.
 
         Loads the last on-disk view as ``_messages`` and restores the resume
@@ -288,12 +292,15 @@ class RLMEngine:
         conversation survived but the REPL is brand new.
         """
         self._messages = list(prior_messages)
+        # The loaded content's view is authoritative — it always matches
+        # ``_messages``, even if a crash mid-compaction left meta.json's view
+        # behind (which would otherwise re-open a branch_reset-closed view, B11).
+        self._view = view
         meta_path = self.session.dir / "meta.json"
         try:
             header = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         except (OSError, json.JSONDecodeError):
             header = {}
-        self._view = header.get("view", 0)
         self._turn_offset = header.get("turn_offset", 0)
         usage = header.get("usage") or {}
         self._total_usage = TokenUsage(

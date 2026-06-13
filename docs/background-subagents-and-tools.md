@@ -114,9 +114,11 @@ just produces many results over time instead of one.
 and `error` with a good result still in the FIFO, are both valid (an errored turn
 halts the worker).
 
-`send`/`poll` are sync; `run`/`wait` are async. The `send`/`poll` signatures and
-docstrings are mirrored onto the wrapped callables, so `help(rlm.send)` and
-`inspect.signature` surface the real API. The model is not given a per-name
+`send`/`poll` are sync; `run`/`wait` are async. Each wrapped callable's `send`
+carries its underlying signature and docstring (`rlm.send` is the real function;
+a skill's `send` mirrors its `run`), so `help(<callable>.send)` and
+`inspect.signature` surface the real arguments; `poll`/`wait` are `Handle`
+methods. The model is not given a per-name
 lookup API — it keeps handles in its own variables (the IPython namespace
 persists across tool calls) and re-`send`s a name to continue. A registry exists
 internally only so `send(name)` can find an existing agent.

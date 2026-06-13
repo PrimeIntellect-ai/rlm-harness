@@ -15,6 +15,7 @@ A worker owns an inbox and drains it sequentially via a :class:`Processor`:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid
 import weakref
 from collections import deque
@@ -254,18 +255,21 @@ class Registry:
     ) -> Handle:
         """Enqueue ``item`` to a worker named ``name`` (creating it if needed).
 
-        ``worker_factory(name)`` is called **only** when no live worker exists for
-        ``name``, so continuations reuse the running worker and never rebuild it.
-        Re-sending a name whose worker halted with an error is refused — start a
-        fresh one under a different name.
+        ``worker_factory(name)`` is called only when no live worker exists for
+        ``name``: a continuation reuses the running worker, while a name whose
+        previous worker halted with an error is rebuilt fresh. Evicting the dead
+        worker keeps the name reusable and the registry from accumulating dead
+        workers.
         """
         if name is None:
             name = uuid.uuid4().hex
         worker = self._workers.get(name)
         if worker is not None and worker.status == ERROR:
-            raise RuntimeError(
-                f"agent {name!r} halted with an error; start a fresh one under a different name"
-            )
+            # The previous worker halted and already released its resources;
+            # evict it and fall through to rebuild, which restarts / resumes the
+            # agent under the same name (B13).
+            del self._workers[name]
+            worker = None
         if worker is None:
             worker = worker_factory(name)
             self._workers[name] = worker
@@ -298,5 +302,16 @@ def attach_background(module, run_callable):
         )
         return Handle(worker)
 
+    # Surface run's call signature + docstring on .send so help(<skill>.send) and
+    # inspect.signature show the real arguments (send forwards them to run and
+    # returns a Handle to poll() / wait()).
+    try:
+        send.__signature__ = inspect.signature(run_callable)
+    except (TypeError, ValueError):
+        pass
+    send.__doc__ = (
+        "Background-launch this tool with the same arguments as run; returns a "
+        f"Handle to poll() / wait().\n\n{run_callable.__doc__ or ''}"
+    )
     module.send = send
     return module

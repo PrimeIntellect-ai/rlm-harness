@@ -118,8 +118,11 @@ def test_session_views_round_trip(tmp_path):
     s.log_message(1, 2, {"role": "user", "content": "carries the summary"})
     s.close()
 
-    # load_latest_view returns only the newest branch, stripped to raw messages
-    assert s.load_latest_view() == [
-        {"role": "system", "content": "sys"},
-        {"role": "user", "content": "carries the summary"},
-    ]
+    # load_latest_view returns (view_index, newest-branch messages stripped raw)
+    assert s.load_latest_view() == (
+        1,
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "carries the summary"},
+        ],
+    )

@@ -93,6 +93,10 @@ def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
     reload_config()
     assert RLMEngine(max_tokens=5).max_tokens == 5
     assert RLMEngine().max_tokens == 100
+    # B7: a non-positive budget means "no limit", not 0 disabling the check by
+    # truthiness or a negative stopping the agent after one turn.
+    assert RLMEngine(max_tokens=0).max_tokens is None
+    assert RLMEngine(max_tokens=-5).max_tokens is None
     monkeypatch.delenv("RLM_MAX_TOKENS", raising=False)
     reload_config()
     assert RLMEngine().max_tokens is None

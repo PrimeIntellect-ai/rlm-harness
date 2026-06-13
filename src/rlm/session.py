@@ -84,16 +84,17 @@ class Session:
     def log_spawn(self, child: str) -> None:
         self._write({"t": "spawn", "child": child})
 
-    def load_latest_view(self) -> list[dict]:
+    def load_latest_view(self) -> tuple[int, list[dict]]:
         """Reconstruct the latest view (the engine's ``_messages``) from disk.
 
-        Groups the append-only ``msg`` lines by ``view`` and returns the
-        highest view's messages, in order — the exact context the model last
-        had. ``[]`` when there is no transcript yet.
+        Returns ``(view_index, messages)`` for the highest view, in order — the
+        exact context the model last had. The index is authoritative for resume
+        (it always matches the returned messages, even if a crash mid-compaction
+        left meta.json's view stale). ``(0, [])`` when there is no transcript yet.
         """
         path = self.dir / "messages.jsonl"
         if not path.exists():
-            return []
+            return 0, []
         with open(path) as f:
             lines = f.readlines()
         msgs: list[dict] = []
@@ -117,9 +118,9 @@ class Session:
             if obj.get("t") == "msg":
                 msgs.append(obj)
         if not msgs:
-            return []
+            return 0, []
         latest = max(m.get("view", 0) for m in msgs)
-        return [_strip_msg(m) for m in msgs if m.get("view", 0) == latest]
+        return latest, [_strip_msg(m) for m in msgs if m.get("view", 0) == latest]
 
     def aggregate_child_metrics(self) -> ChildSessionAggregate:
         """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""

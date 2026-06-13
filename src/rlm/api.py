@@ -128,7 +128,7 @@ def send(
     from a later cell. Re-sending the same ``name`` appends a turn to the same
     agent (multi-turn). ``name`` is canonicalized to a filesystem-safe form, so
     names differing only in unsafe characters (``foo/bar`` and ``foo-bar``)
-    refer to the same agent. ``name=None`` draws a deterministic auto-name.
+    refer to the same agent. ``name=None`` draws a random auto-name (a uuid hex).
     ``engine_kwargs`` (e.g. ``model=...``) are forwarded to the sub-agent's
     ``RLMEngine`` and apply only when the agent is first created.
 
@@ -142,6 +142,11 @@ def send(
     if name is not None:
         name = _sanitize_name(name)
 
+    # A non-positive request means "no explicit budget": treat it as omitted so it
+    # falls back to the ceiling / default, instead of 0 disabling the budget by
+    # truthiness or a negative stopping the sub-agent after one turn (B7).
+    if max_tokens is not None and max_tokens <= 0:
+        max_tokens = None
     ceiling = get_config().sub_max_tokens
     if ceiling is not None:
         max_tokens = min(max_tokens, ceiling) if max_tokens is not None else ceiling

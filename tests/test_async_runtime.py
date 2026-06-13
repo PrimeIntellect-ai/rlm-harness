@@ -124,9 +124,13 @@ async def test_error_surfaces_live_exception():
     assert isinstance(state.error, ValueError)
     with pytest.raises(ValueError, match="boom"):
         await handle.wait()
-    # reusing an errored name is refused; start a fresh one under a different name
-    with pytest.raises(RuntimeError, match="halted with an error"):
-        reg.send(2, name="w", worker_factory=lambda n: BackgroundWorker(n, _Boom()))
+    # re-sending an errored name restarts it: the dead worker is evicted and a
+    # fresh one is built under the same name.
+    handle2 = reg.send(
+        9, name="w", worker_factory=lambda n: BackgroundWorker(n, _Doubler())
+    )
+    assert await handle2.wait() == 18
+    assert reg.get("w") is not None
 
 
 async def test_close_all_tears_down_workers():
