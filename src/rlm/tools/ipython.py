@@ -152,7 +152,14 @@ class IPythonREPL:
         self._inject_startup()
 
     def _inject_startup(self):
-        """Set up kernel: cwd, env vars, nest_asyncio, skill pre-imports."""
+        """Set the kernel's cwd + per-kernel env, apply nest_asyncio, and wrap
+        skills / ``rlm`` into the kernel namespace.
+
+        The wrapping logic lives in ``rlm._kernel_bootstrap`` (a real module). The
+        injected cell is just the plumbing that can't move there: it sets the
+        per-kernel env vars (the cross-process config transport) and merges the
+        wrapped modules into the kernel's interactive ``globals()``.
+        """
         session_dir = str(self.session.dir) if self.session else None
         live_agents_dir = os.environ.get("RLM_LIVE_AGENTS_DIR", "")
         depth = int(os.environ.get("RLM_DEPTH", "0"))
@@ -161,7 +168,7 @@ class IPythonREPL:
         installed_skills = get_installed_skills()
 
         setup_code = f"""\
-import os, sys, types, json, time, functools, inspect
+import os
 os.chdir({self.cwd!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
@@ -170,62 +177,8 @@ os.environ['RLM_LIVE_AGENTS_DIR'] = {live_agents_dir!r}
 import nest_asyncio
 nest_asyncio.apply()
 
-
-def _log_programmatic_call(tool_name, source):
-    # Matches the line format written by install.sh's bash wrapper so
-    # ProgrammaticToolCallStats.from_log parses both sources identically.
-    session_dir = os.environ.get('RLM_SESSION_DIR', '')
-    if not session_dir:
-        return
-    try:
-        with open(os.path.join(session_dir, 'programmatic_tool_calls.jsonl'), 'a') as f:
-            f.write(json.dumps({{
-                'tool': tool_name,
-                'source': source,
-                'timestamp': time.time(),
-            }}) + '\\n')
-    except OSError:
-        pass
-
-
-class _CallableModule(types.ModuleType):
-    # Make `await <skill>(...)` shorthand for `await <skill>.run(...)`.
-    # __call__ is looked up on the type, not the instance, so the
-    # override has to live on the class.
-    async def __call__(self, *args, **kwargs):
-        return await self.run(*args, **kwargs)
-
-
-def _wrap_callable(mod, log_source):
-    # log_source: 'python' for skills (logged to programmatic_tool_calls.jsonl),
-    # None for rlm (already aggregated via Session.aggregate_child_metrics).
-    wrapped = _CallableModule(mod.__name__)
-    wrapped.__dict__.update(mod.__dict__)
-    if log_source is not None:
-        _original_run = wrapped.run
-        @functools.wraps(_original_run)
-        async def _logged_run(*args, **kwargs):
-            _log_programmatic_call(mod.__name__, log_source)
-            return await _original_run(*args, **kwargs)
-        wrapped.run = _logged_run
-    # Mirror run's signature and docstring onto the module so
-    # `inspect.signature(<skill>)` and `help(<skill>)` expose the real API
-    # surface instead of `_CallableModule.__call__`'s `(*args, **kwargs)`
-    # and the file-level module docstring.
-    wrapped.__signature__ = inspect.signature(wrapped.run)
-    wrapped.__doc__ = wrapped.run.__doc__
-    sys.modules[mod.__name__] = wrapped
-    return wrapped
-
-
-from rlm._async_runtime import attach_background as _attach_background
-for _name in {installed_skills!r}:
-    _skill = _wrap_callable(__import__(_name), 'python')
-    _attach_background(_skill, _skill.run)
-    globals()[_name] = _skill
-
-if {allow_recursion!r}:
-    globals()['rlm'] = _wrap_callable(__import__('rlm'), None)
+from rlm._kernel_bootstrap import build_namespace as _build_namespace
+globals().update(_build_namespace({installed_skills!r}, {allow_recursion!r}))
 """
         self._execute_silent(setup_code)
 
