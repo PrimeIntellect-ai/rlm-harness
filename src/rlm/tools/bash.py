@@ -8,10 +8,10 @@ shell work, the ipython tool's ``!command`` / ``%%bash`` are still available.
 from __future__ import annotations
 
 import copy
-import os
 import subprocess
 from typing import Any
 
+from rlm.config import get_config
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.git_block import find_blocked_command, refusal
 
@@ -52,7 +52,7 @@ class BashTool:
 
     def schema(self) -> dict[str, Any]:
         timeout = min(
-            int(os.environ.get("RLM_EXEC_TIMEOUT", "300")),
+            get_config().exec_timeout,
             BASH_TIMEOUT_MAX_SECONDS,
         )
         schema = copy.deepcopy(BASH_SCHEMA)

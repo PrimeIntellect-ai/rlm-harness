@@ -86,12 +86,15 @@ async def test_send_collapses_names_that_sanitize_alike(monkeypatch, tmp_path):
 
 
 def test_engine_max_tokens_kwarg_overrides_env(monkeypatch):
+    from rlm.config import reload_config
     from rlm.engine import RLMEngine
 
     monkeypatch.setenv("RLM_MAX_TOKENS", "100")
+    reload_config()
     assert RLMEngine(max_tokens=5).max_tokens == 5
     assert RLMEngine().max_tokens == 100
     monkeypatch.delenv("RLM_MAX_TOKENS", raising=False)
+    reload_config()
     assert RLMEngine().max_tokens is None
 
 

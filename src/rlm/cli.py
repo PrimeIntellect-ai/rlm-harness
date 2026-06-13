@@ -7,6 +7,7 @@ import os
 import sys
 
 import rlm
+import rlm.config
 
 
 def main():
@@ -36,13 +37,15 @@ def main():
     )
     args = parser.parse_args()
 
-    # Apply CLI overrides to env
+    # Apply CLI overrides to env, then refresh the cached config so this process
+    # (and the kernels it spawns, which inherit the env) sees them.
     if args.model:
         os.environ["RLM_MODEL"] = args.model
     if args.system_prompt_path:
         os.environ["RLM_SYSTEM_PROMPT_PATH"] = args.system_prompt_path
     if args.append_to_system_prompt:
         os.environ["RLM_APPEND_TO_SYSTEM_PROMPT"] = args.append_to_system_prompt
+    rlm.config.reload_config()
 
     if args.prompt:
         print(asyncio.run(rlm.run(args.prompt)).answer)

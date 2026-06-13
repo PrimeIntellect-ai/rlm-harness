@@ -134,6 +134,17 @@ def show_tool_result(output: str) -> None:
 # --- Fixtures ------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _fresh_config_cache():
+    """Clear the cached Config around every test so per-test ``monkeypatch.setenv``
+    of ``RLM_*`` vars is honored (the cache is process-lifetime in production)."""
+    from rlm.config import load_config
+
+    load_config.cache_clear()
+    yield
+    load_config.cache_clear()
+
+
 @pytest.fixture
 def register_add_tool(monkeypatch):
     """Restrict RLM_TOOLS to ``add`` so the engine doesn't bring up the ipython kernel."""

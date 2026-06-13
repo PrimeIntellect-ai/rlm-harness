@@ -29,6 +29,8 @@ import time
 import uuid
 from pathlib import Path
 
+from rlm.config import get_config
+
 try:
     import fcntl
 except ImportError:  # non-POSIX: cap disabled
@@ -42,19 +44,19 @@ class AgentLimitReached(RuntimeError):
 # Pool -> (limit env var, markers subdir under RLM_LIVE_AGENTS_DIR).
 TOTAL = "total"
 RUNNING = "running"
+# Pool -> (Config attribute holding its limit, markers subdir name).
 _POOLS = {
-    TOTAL: ("RLM_MAX_LIVE_AGENTS", "total"),
-    RUNNING: ("RLM_MAX_RUNNING_AGENTS", "running"),
+    TOTAL: ("max_live_agents", "total"),
+    RUNNING: ("max_running_agents", "running"),
 }
 
 
 def _limit(pool: str) -> int | None:
-    value = int(os.environ.get(_POOLS[pool][0], "0"))
-    return value if value > 0 else None
+    return getattr(get_config(), _POOLS[pool][0])
 
 
 def _markers_dir(pool: str) -> Path | None:
-    raw = os.environ.get("RLM_LIVE_AGENTS_DIR")
+    raw = get_config().live_agents_dir
     return Path(raw) / _POOLS[pool][1] if raw else None
 
 
@@ -123,14 +125,6 @@ def release_slot(marker: Path | None) -> None:
 _WAIT_POLL_INTERVAL = 0.25
 
 
-def _wait_timeout() -> float | None:
-    raw = os.environ.get("RLM_AGENT_WAIT_TIMEOUT")
-    if raw is None:
-        return 300.0
-    value = float(raw)
-    return value if value > 0 else None  # 0 -> wait indefinitely
-
-
 async def acquire_slot_blocking(pool: str) -> Path | None:
     """Reserve a slot in ``pool``, waiting until one frees (vs. the immediate no).
 
@@ -143,7 +137,7 @@ async def acquire_slot_blocking(pool: str) -> Path | None:
     granted, marker = acquire_slot(pool)
     if granted:
         return marker
-    timeout = _wait_timeout()
+    timeout = get_config().agent_wait_timeout
     start = time.monotonic()
     while True:
         await asyncio.sleep(_WAIT_POLL_INTERVAL)

@@ -13,6 +13,7 @@ from openai import (
     RateLimitError,
 )
 
+from rlm.config import get_config
 from rlm.types import TokenUsage
 
 _RETRYABLE: tuple[type[BaseException], ...] = (
@@ -70,11 +71,12 @@ def make_client() -> AsyncOpenAI:
     record them in the rollout's trajectory.
     """
     base_url, api_key, extra_headers = resolve_provider()
-    headers = {"X-RLM-Depth": os.environ.get("RLM_DEPTH", "0"), **extra_headers}
+    cfg = get_config()
+    headers = {"X-RLM-Depth": str(cfg.depth), **extra_headers}
     return AsyncOpenAI(
         base_url=base_url,
         api_key=api_key,
-        max_retries=int(os.environ.get("RLM_SDK_MAX_RETRIES", 5)),
+        max_retries=cfg.sdk_max_retries,
         default_headers=headers,
     )
 

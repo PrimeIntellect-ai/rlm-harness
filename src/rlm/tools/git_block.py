@@ -15,9 +15,10 @@ compatibility with environments that already opted out of git restrictions.
 from __future__ import annotations
 
 import ast
-import os
 import re
 import shlex
+
+from rlm.config import get_config
 
 REFUSAL_TEMPLATE = (
     "Git history option '{cmd}' is not allowed. Use current-branch history only."
@@ -53,7 +54,7 @@ _GIT_GLOBAL_OPTIONS_WITH_VALUE = {
 
 
 def allow_git() -> bool:
-    return os.environ.get("RLM_ALLOW_GIT") == "1"
+    return get_config().allow_git
 
 
 def find_blocked_command(command: str) -> str | None:

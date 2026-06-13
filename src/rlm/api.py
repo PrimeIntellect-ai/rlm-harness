@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 from rlm._agent_limit import (
     RUNNING,
@@ -14,6 +13,7 @@ from rlm._agent_limit import (
     release_slot,
 )
 from rlm._async_runtime import Handle, Registry, close_all_registries
+from rlm.config import get_config
 from rlm.engine import RLMEngine
 from rlm.session import Session, _sanitize_name
 from rlm.types import RLMResult
@@ -22,12 +22,12 @@ from rlm.types import RLMResult
 def _is_subagent() -> bool:
     """True below the root rollout (depth > 0), so this agent counts against the
     live-agent caps; the root rollout (depth 0) is uncapped."""
-    return int(os.environ.get("RLM_DEPTH", "0")) > 0
+    return get_config().depth > 0
 
 
 def _child_session(name: str | None = None) -> Session | None:
     """If inside a parent session (depth > 0), create a child under it."""
-    parent_dir = os.environ.get("RLM_SESSION_DIR")
+    parent_dir = get_config().session_dir
     if parent_dir and _is_subagent():
         return Session(Session.child_dir(parent_dir, name=name))
     return None
@@ -140,7 +140,7 @@ def send(
     if name is not None:
         name = _sanitize_name(name)
 
-    ceiling = int(os.environ.get("RLM_SUB_MAX_TOKENS", "0")) or None
+    ceiling = get_config().sub_max_tokens
     if ceiling is not None:
         max_tokens = min(max_tokens, ceiling) if max_tokens is not None else ceiling
     if max_tokens is not None:

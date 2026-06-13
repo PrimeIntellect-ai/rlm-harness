@@ -11,6 +11,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from rlm.config import get_config
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.git_block import find_blocked_in_ipython, refusal
 from rlm.tools.skills import get_installed_skills
@@ -60,7 +61,7 @@ class IpythonTool:
 
     def schema(self) -> dict[str, Any]:
         timeout = min(
-            int(os.environ.get("RLM_EXEC_TIMEOUT", "300")),
+            get_config().exec_timeout,
             IPYTHON_TIMEOUT_MAX_SECONDS,
         )
         schema = copy.deepcopy(IPYTHON_SCHEMA)
@@ -115,7 +116,7 @@ class IpythonTool:
     @staticmethod
     def _maybe_truncate_output(content: str) -> str:
         """Truncate ``content`` to ``RLM_MAX_TOOL_OUTPUT_CHARS`` if set (off by default)."""
-        cap = int(os.environ.get("RLM_MAX_TOOL_OUTPUT_CHARS", "-1"))
+        cap = get_config().max_tool_output_chars
         if cap <= 0 or len(content) <= cap:
             return content
         head, tail = cap // 2, cap - cap // 2

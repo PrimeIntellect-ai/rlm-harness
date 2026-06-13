@@ -12,6 +12,7 @@ from pathlib import Path
 from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
+from rlm.config import Config, _parse_summarize_at_tokens, load_config, with_overrides
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -112,37 +113,6 @@ def _parse_tool_call_args(raw: str) -> tuple[dict | None, dict | None]:
     return args, None
 
 
-def _parse_summarize_at_tokens(value: int | str | None) -> int | None:
-    """Normalize ``summarize_at_tokens`` to a positive int or ``None``.
-
-    Accepts:
-      - ``None`` / empty string → disabled.
-      - ``int`` → fixed threshold.
-      - ``str`` (from env var) → "N".
-    """
-    if value is None or value == "":
-        return None
-    if isinstance(value, bool):
-        raise ValueError("summarize_at_tokens must be an int")
-    if isinstance(value, str):
-        try:
-            parsed = int(value.strip())
-        except ValueError as exc:
-            raise ValueError(
-                f"summarize_at_tokens must be an int (got {value!r})"
-            ) from exc
-    elif isinstance(value, int):
-        parsed = value
-    else:
-        raise ValueError(
-            f"summarize_at_tokens must be int or None (got {type(value).__name__})"
-        )
-
-    if parsed <= 0:
-        raise ValueError(f"summarize_at_tokens must be positive (got {parsed})")
-    return parsed
-
-
 class RLMEngine:
     def __init__(
         self,
@@ -154,38 +124,34 @@ class RLMEngine:
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
         max_tokens: int | None = None,
+        config: Config | None = None,
     ):
-        self.model = model or os.environ.get("RLM_MODEL", "openai/gpt-5-mini")
+        # Fold constructor overrides into the env-derived config; an explicit
+        # kwarg wins over the corresponding RLM_* variable. summarize_at_tokens
+        # is parsed (it accepts int or numeric str) before being applied.
+        base = config if config is not None else load_config()
+        self.config = with_overrides(
+            base,
+            model=model,
+            system_prompt_path=system_prompt_path,
+            append_to_system_prompt=append_to_system_prompt,
+            max_tokens=max_tokens,
+            summarize_at_tokens=(
+                _parse_summarize_at_tokens(summarize_at_tokens)
+                if summarize_at_tokens is not None
+                else None
+            ),
+        )
+        self.model = self.config.model
         self.cwd = cwd or os.getcwd()
-        self.exec_timeout = int(os.environ.get("RLM_EXEC_TIMEOUT", "300"))
-        max_output = int(os.environ.get("RLM_MAX_OUTPUT", "-1"))
-        if max_output == 0:
-            raise ValueError(
-                "RLM_MAX_OUTPUT must be positive, or -1 to disable truncation"
-            )
-        self.max_output = max_output
-
-        # Auto-compaction threshold: user kwarg wins; otherwise parse env var.
-        if summarize_at_tokens is None:
-            env_value = os.environ.get("RLM_SUMMARIZE_AT_TOKENS")
-        else:
-            env_value = summarize_at_tokens
-        self.summarize_at_tokens = _parse_summarize_at_tokens(env_value)
-
-        self.system_prompt_path = system_prompt_path or os.environ.get(
-            "RLM_SYSTEM_PROMPT_PATH"
-        )
-        self.append_to_system_prompt = append_to_system_prompt or os.environ.get(
-            "RLM_APPEND_TO_SYSTEM_PROMPT"
-        )
-        self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
-        self.depth = int(os.environ.get("RLM_DEPTH", "0"))
-
-        # Token budget: explicit kwarg wins, otherwise RLM_MAX_TOKENS.
-        if max_tokens is None:
-            _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
-            max_tokens = _max_tok if _max_tok > 0 else None
-        self.max_tokens = max_tokens
+        self.exec_timeout = self.config.exec_timeout
+        self.max_output = self.config.max_output
+        self.summarize_at_tokens = self.config.summarize_at_tokens
+        self.system_prompt_path = self.config.system_prompt_path
+        self.append_to_system_prompt = self.config.append_to_system_prompt
+        self.max_depth = self.config.max_depth
+        self.depth = self.config.depth
+        self.max_tokens = self.config.max_tokens
 
         self.client = client or make_client()
         self.session = session
@@ -220,8 +186,7 @@ class RLMEngine:
         """Create session if not set."""
         if self.session is not None:
             return
-        session_dir = os.environ.get("RLM_SESSION_DIR")
-        self.session = Session(session_dir)
+        self.session = Session(self.config.session_dir)
 
     async def run(self, prompt: str) -> RLMResult:
         """Run a single agent loop to completion (setup + one advance + close)."""
@@ -247,11 +212,10 @@ class RLMEngine:
 
         self._ensure_session()
         if self.depth == 0 and (
-            os.environ.get("RLM_MAX_LIVE_AGENTS")
-            or os.environ.get("RLM_MAX_RUNNING_AGENTS")
+            self.config.max_live_agents or self.config.max_running_agents
         ):
             # Root derives the shared marker dir; it propagates to every kernel
-            # (via _inject_startup) so both caps are tree-global.
+            # (via _inject_startup, which reads env) so both caps are tree-global.
             os.environ.setdefault(
                 "RLM_LIVE_AGENTS_DIR", str(self.session.dir / ".live_agents")
             )

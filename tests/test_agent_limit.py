@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from rlm import _agent_limit as lim
+from rlm.config import reload_config
 
 
 def test_cap_grants_up_to_limit_then_refuses(monkeypatch, tmp_path):
@@ -48,6 +49,17 @@ def test_cap_disabled_when_limit_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path))
 
     for _ in range(20):
+        granted, marker = lim.acquire_slot(lim.TOTAL)
+        assert granted and marker is None  # disabled -> always granted, no marker
+
+
+def test_cap_disabled_on_malformed_limit(monkeypatch, tmp_path):
+    # A harness templating an unset var to "" (or a typo / negative) must disable
+    # the cap, not crash acquire_slot on the agent hot path.
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path))
+    for bad in ("", "abc", "-1"):
+        monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", bad)
+        reload_config()
         granted, marker = lim.acquire_slot(lim.TOTAL)
         assert granted and marker is None  # disabled -> always granted, no marker
 
