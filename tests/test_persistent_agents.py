@@ -8,8 +8,8 @@ import asyncio
 import pytest
 from conftest import DummyClient, DummyMessage
 
-from rlm._async_runtime import ERROR, FINISHED
-from rlm._agent_limit import AgentLimitReached
+from rlm.async_runtime import ERROR, FINISHED
+from rlm.agent_limit import AgentLimitReached
 
 
 async def _settle(handle, *, want=FINISHED, tries=400):
@@ -210,7 +210,7 @@ async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_MAX_DEPTH", "1")
     monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
     monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
-    from rlm import _agent_limit as lim
+    from rlm import agent_limit as lim
     from rlm import api
 
     granted, held = lim.acquire_slot(lim.TOTAL)  # occupy the only slot

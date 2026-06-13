@@ -125,7 +125,7 @@ internally only so `send(name)` can find an existing agent.
 
 ### 3.2 Workers, handles, and the registry
 
-`rlm/_async_runtime.py` (imported by `_inject_startup`, not inlined into the
+`rlm/async_runtime.py` (imported by `_inject_startup`, not inlined into the
 setup f-string) provides the background machinery:
 
 - A **worker** runs a **processor** and exposes its state through a `Handle`.

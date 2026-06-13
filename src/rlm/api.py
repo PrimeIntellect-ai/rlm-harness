@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from rlm._agent_limit import (
+from rlm.agent_limit import (
     RUNNING,
     TOTAL,
     AgentLimitReached,
@@ -12,7 +12,7 @@ from rlm._agent_limit import (
     acquire_slot_blocking,
     release_slot,
 )
-from rlm._async_runtime import BackgroundWorker, Handle, Registry, close_all_registries
+from rlm.async_runtime import BackgroundWorker, Handle, Registry, close_all_registries
 from rlm.config import get_config
 from rlm.engine import RLMEngine
 from rlm.session import Session, _sanitize_name

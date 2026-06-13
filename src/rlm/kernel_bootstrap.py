@@ -21,7 +21,7 @@ import sys
 import time
 import types
 
-from rlm._async_runtime import attach_background
+from rlm.async_runtime import attach_background
 
 
 def _log_programmatic_call(tool_name: str, source: str) -> None:

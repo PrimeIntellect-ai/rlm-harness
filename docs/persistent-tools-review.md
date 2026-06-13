@@ -1,8 +1,8 @@
 # Review: persistent / background sub-agents branch
 
 Review of `sebastian/persistent-tools-2026-06-11` (at `7a8abcb`) against `main`,
-covering the background/persistent sub-agent feature (`_async_runtime.py`,
-`_agent_limit.py`) and the resumable-engine + session-persistence rewrite
+covering the background/persistent sub-agent feature (`async_runtime.py`,
+`agent_limit.py`) and the resumable-engine + session-persistence rewrite
 (`engine.py`, `session.py`, `tools/ipython.py`, `api.py`, `types.py`,
 `prompt.py`). Findings are bugs first (severity-ordered), then macro
 architecture / maintainability, then what was checked and found clean.
@@ -35,7 +35,7 @@ Line numbers are as of the reviewed commit and will drift.
 Implemented (see commits on this branch):
 
 - **Config sprawl** → `rlm/config.py`: one cached, immutable `Config`; behavior-preserving.
-- **Macro #4 (kernel bootstrap f-string)** → extracted to `rlm/_kernel_bootstrap.py`.
+- **Macro #4 (kernel bootstrap f-string)** → extracted to `rlm/kernel_bootstrap.py`.
 - **Macro #5 (`Registry.send` two-factory + holder-dict)** → single `worker_factory(name)`.
 - **Macro #1 (split slot ownership)** → reservation + creation-failure release consolidated
   into `worker_factory`; fixes **B2**.
@@ -169,7 +169,7 @@ on the level below with its own `timeout=120`. On drain-cell timeout
 `_interrupt_and_recover` may `restart_kernel(now=True)`, orphaning grandchild
 kernels — the precise outcome §3.7 claims the graceful recursion prevents. Three
 layers of bare `except Exception: pass` (`engine.py:563`,
-`_async_runtime.close_all`, the drain) discard the failure silently, and no test
+`async_runtime.close_all`, the drain) discard the failure silently, and no test
 exercises the cascade with a live REPL.
 
 **Fix direction.** `to_thread` the blocking REPL calls; make the drain budget
@@ -178,7 +178,7 @@ drain; `log` instead of `pass`. Add an end-to-end cascade test.
 
 ### B6 — Non-int / empty cap env vars crash on the hot path (MEDIUM)
 
-`_limit` (`_agent_limit.py:52`) and `_wait_timeout` (`:130`) call `int()` /
+`_limit` (`agent_limit.py:52`) and `_wait_timeout` (`:130`) call `int()` /
 `float()` with no guard. `RLM_MAX_LIVE_AGENTS=""` — a common slip when an
 external harness templates an unset value to empty string — raises `ValueError`
 out of `acquire_slot` on *every* `send` / turn / one-off. This contradicts the
@@ -206,12 +206,12 @@ maps `0` → ceiling.
 
 ### Low severity
 
-- **B8 — `close()` never sets a terminal status** (`_async_runtime.py:180`):
+- **B8 — `close()` never sets a terminal status** (`async_runtime.py:180`):
   after teardown `poll()` reports `running` forever and `wait()` raises a bare
   `RuntimeError`. Only reachable at end-of-rollout teardown when nothing polls,
   but the status contract is violated.
 - **B9 — `submit()` has no guard against an ended/closing worker**
-  (`_async_runtime.py:135`): would silently drop the item and set a fake
+  (`async_runtime.py:135`): would silently drop the item and set a fake
   `running`. Latent — not currently reachable via the registry (errored workers
   are guarded at `:256`; closed workers are cleared from `_workers`) — but the
   method is unsafe.
@@ -223,7 +223,7 @@ maps `0` → ceiling.
   deprecated; fine today (always under a live cell loop), brittle on 3.10+. Use
   `get_running_loop()`.
 - **B13 — Errored resident workers are never evicted from `_REGISTRY`**
-  (`_async_runtime.py:255`): the name is permanently poisoned and the dict grows.
+  (`async_runtime.py:255`): the name is permanently poisoned and the dict grows.
 - **B14 — Doc/wording:** "send/poll signatures mirrored onto the wrapped
   callables" is true for `rlm.send` but not skills' `.send` (no
   `functools.wraps` / `__signature__` / doc); `send`'s docstring (`api.py:129`)
@@ -253,13 +253,13 @@ maps `0` → ceiling.
    (`tools/ipython.py:162-228`), defining `_CallableModule`, `_wrap_callable`,
    `_log_programmatic_call`. Untestable, no syntax/type checking, interpolates
    paths via `!r` into executable code. Move the body into a real
-   `_kernel_bootstrap.py` and have `_inject_startup` exec a tiny stub that imports
+   `kernel_bootstrap.py` and have `_inject_startup` exec a tiny stub that imports
    it and passes the runtime values.
 5. **`Registry.send`'s two-factory + `holder`-dict closure dance** (`api.py:163`,
-   `_async_runtime.py:239`): collapse to one `worker_factory(name)` built in
+   `async_runtime.py:239`): collapse to one `worker_factory(name)` built in
    `api.py`.
 6. **Config sprawl.** ~22 `RLM_*` vars read ad hoc via `os.environ.get` across
-   `engine`, `api`, `_agent_limit`, `tools/ipython`, `prompt`, `client`,
+   `engine`, `api`, `agent_limit`, `tools/ipython`, `prompt`, `client`,
    `tools/git_block`, `tools/registry`. No single source of truth; kernel
    propagation relies on implicit subprocess env inheritance plus three explicit
    overrides. Tracked separately as the config refactor.
@@ -267,7 +267,7 @@ maps `0` → ceiling.
    block and the metrics bookkeeping are cleanly extractable.
 8. **`BackgroundWorker` conflates resident vs ephemeral** via an `_ephemeral`
    flag with subtle post-`clear()` re-checks in `_drain`
-   (`_async_runtime.py:140-163`): split or heavily comment the invariant.
+   (`async_runtime.py:140-163`): split or heavily comment the invariant.
 
 ## Verified clean (where not to worry)
 

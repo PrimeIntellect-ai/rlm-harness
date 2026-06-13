@@ -155,7 +155,7 @@ class IPythonREPL:
         """Set the kernel's cwd + per-kernel env, apply nest_asyncio, and wrap
         skills / ``rlm`` into the kernel namespace.
 
-        The wrapping logic lives in ``rlm._kernel_bootstrap`` (a real module). The
+        The wrapping logic lives in ``rlm.kernel_bootstrap`` (a real module). The
         injected cell is just the plumbing that can't move there: it sets the
         per-kernel env vars (the cross-process config transport) and merges the
         wrapped modules into the kernel's interactive ``globals()``.
@@ -177,7 +177,7 @@ os.environ['RLM_LIVE_AGENTS_DIR'] = {live_agents_dir!r}
 import nest_asyncio
 nest_asyncio.apply()
 
-from rlm._kernel_bootstrap import build_namespace as _build_namespace
+from rlm.kernel_bootstrap import build_namespace as _build_namespace
 globals().update(_build_namespace({installed_skills!r}, {allow_recursion!r}))
 """
         self._execute_silent(setup_code)

@@ -1,10 +1,10 @@
-"""Tests for the cross-process live-agent cap (rlm._agent_limit)."""
+"""Tests for the cross-process live-agent cap (rlm.agent_limit)."""
 
 import asyncio
 import subprocess
 import sys
 
-from rlm import _agent_limit as lim
+from rlm import agent_limit as lim
 from rlm.config import reload_config
 
 

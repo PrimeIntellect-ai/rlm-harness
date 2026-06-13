@@ -1,4 +1,4 @@
-"""Tests for the background worker runtime (rlm._async_runtime).
+"""Tests for the background worker runtime (rlm.async_runtime).
 
 Plain async functions; no kernel or engine — a worker is driven with trivial
 in-process processors.
@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from rlm._async_runtime import (
+from rlm.async_runtime import (
     ERROR,
     FINISHED,
     RUNNING,
@@ -163,7 +163,7 @@ async def test_auto_named_send_registers_a_worker():
 async def test_attach_background_adds_send():
     import types
 
-    from rlm._async_runtime import attach_background
+    from rlm.async_runtime import attach_background
 
     mod = types.ModuleType("fakeskill")
 
