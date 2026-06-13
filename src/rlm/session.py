@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 import uuid
@@ -93,15 +94,28 @@ class Session:
         path = self.dir / "messages.jsonl"
         if not path.exists():
             return []
-        msgs: list[dict] = []
         with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                obj = json.loads(line)
-                if obj.get("t") == "msg":
-                    msgs.append(obj)
+            lines = f.readlines()
+        msgs: list[dict] = []
+        for i, raw in enumerate(lines):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                # A hard crash mid-write can leave the final line torn; drop it
+                # and resume from the rest (the view minus its last unfinished
+                # message is still a valid continuation). A malformed line
+                # anywhere else is real corruption, so re-raise.
+                if i == len(lines) - 1:
+                    logging.getLogger(__name__).warning(
+                        "dropping torn final line in %s", path
+                    )
+                    break
+                raise
+            if obj.get("t") == "msg":
+                msgs.append(obj)
         if not msgs:
             return []
         latest = max(m.get("view", 0) for m in msgs)
