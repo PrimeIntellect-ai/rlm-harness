@@ -13,20 +13,45 @@ Line numbers are as of the reviewed commit and will drift.
 
 | ID | Severity | One-liner |
 |----|----------|-----------|
-| B1 | HIGH | Dangling assistant `tool_calls` → invalid message sequence → API 400 |
-| B2 | HIGH | TOTAL-slot leak in `run()` — acquires sit outside the `try/finally` |
-| B3 | HIGH | Resume header written at turn *start* → resumed agent undercounts usage/metrics |
-| B4 | MED-HIGH | Torn last line in `messages.jsonl` permanently wedges resume |
-| B5 | MEDIUM | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
-| B6 | MEDIUM (fixed) | Non-int / empty cap env vars crash on the hot path instead of disabling the cap |
-| B7 | MEDIUM | `max_tokens` clamp diverges from the documented formula for `0` / negative |
-| B8 | LOW | `close()` never sets a terminal status |
-| B9 | LOW | `submit()` has no guard against an ended/closing worker (latent) |
-| B10 | LOW | `turn_offset` off-by-one on resume (same root cause as B3) |
-| B11 | LOW | Mid-compaction crash can re-open a `branch_reset`-closed view on disk |
-| B12 | LOW | `asyncio.get_event_loop()` in `_drain_agents` is deprecated |
-| B13 | LOW | Errored resident workers are never evicted from the registry |
-| B14 | LOW | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
+| ID | Severity | Status | One-liner |
+|----|----------|--------|-----------|
+| B1 | HIGH | open | Dangling assistant `tool_calls` → invalid message sequence → API 400 |
+| B2 | HIGH | **fixed** | TOTAL-slot leak in `run()` — acquires sit outside the `try/finally` |
+| B3 | HIGH | open | Resume header written at turn *start* → resumed agent undercounts usage/metrics |
+| B4 | MED-HIGH | **fixed** | Torn last line in `messages.jsonl` permanently wedges resume |
+| B5 | MEDIUM | **mostly fixed** | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
+| B6 | MEDIUM | **fixed** | Non-int / empty cap env vars crash on the hot path instead of disabling the cap |
+| B7 | MEDIUM | open | `max_tokens` clamp diverges from the documented formula for `0` / negative |
+| B8 | LOW | **fixed** | `close()` never sets a terminal status |
+| B9 | LOW | **fixed** | `submit()` has no guard against an ended/closing worker (latent) |
+| B10 | LOW | open | `turn_offset` off-by-one on resume (same root cause as B3) |
+| B11 | LOW | open | Mid-compaction crash can re-open a `branch_reset`-closed view on disk |
+| B12 | LOW | **fixed** | `asyncio.get_event_loop()` in `_drain_agents` is deprecated |
+| B13 | LOW | open | Errored resident workers are never evicted from the registry |
+| B14 | LOW | open | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
+
+## Re-check after the config + architecture passes
+
+Implemented (see commits on this branch):
+
+- **Config sprawl** → `rlm/config.py`: one cached, immutable `Config`; behavior-preserving.
+- **Macro #4 (kernel bootstrap f-string)** → extracted to `rlm/_kernel_bootstrap.py`.
+- **Macro #5 (`Registry.send` two-factory + holder-dict)** → single `worker_factory(name)`.
+- **Macro #1 (split slot ownership)** → reservation + creation-failure release consolidated
+  into `worker_factory`; fixes **B2**.
+- **Macro #8 (`BackgroundWorker` lifecycle)** → terminal status on `close()` + `submit()`
+  guard (**B8**, **B9**); kept the `_ephemeral` flag (commented) rather than a full split.
+- **B4** (torn-line tolerance), **B5** (teardown off the loop + logged; *partial* — the
+  drain-timeout kernel-restart orphan edge remains), **B6** (tolerant caps), **B12**
+  (`get_running_loop`).
+
+Deferred:
+
+- **Macro #7 (`advance()` decomposition)** — left to do alongside B1/B3, which live in the
+  same loop.
+
+Still open: **B1**, **B3** (both HIGH; the message-sequence / resume-header logic in
+`advance()`/`_resume`), **B7**, **B10**, **B11**, **B13**, **B14**.
 
 ---
 
