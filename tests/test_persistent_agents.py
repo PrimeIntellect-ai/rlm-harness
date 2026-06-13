@@ -252,3 +252,74 @@ async def test_engine_resumes_from_disk(monkeypatch, tmp_path):
     result = await e2.advance("follow-up")
     assert result.answer == "second answer"  # continues with the restored context
     await e2.aclose()
+
+
+async def test_resume_answers_dangling_tool_call(monkeypatch, tmp_path):
+    # A transcript cut off after the assistant's tool_calls but before the tool
+    # result (a token-budget stop or a crash mid-exec) must not resume into an
+    # assistant-tool_calls turn directly followed by a user turn (an API 400).
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.delenv("RLM_DEPTH", raising=False)
+    monkeypatch.delenv("RLM_MAX_DEPTH", raising=False)
+    from rlm.engine import RLMEngine
+    from rlm.session import Session
+
+    sdir = tmp_path / "agent"
+    seed = Session(sdir)
+    seed.log_message(0, 0, {"role": "system", "content": "sys"})
+    seed.log_message(0, 0, {"role": "user", "content": "task"})
+    seed.log_message(
+        0,
+        1,
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_0",
+                    "type": "function",
+                    "function": {"name": "ipython", "arguments": "{}"},
+                }
+            ],
+        },
+    )
+    seed.close()
+
+    e = RLMEngine(
+        session=Session(sdir),
+        client=DummyClient([DummyMessage(content="resumed answer")]),
+    )
+    e.setup()
+    # the dangling call is answered (a synthetic tool result) before the resume
+    # warning, so no user turn ever directly follows the assistant tool_calls.
+    assert e._messages[2]["role"] == "assistant" and e._messages[2].get("tool_calls")
+    assert e._messages[3] == {
+        "role": "tool",
+        "tool_call_id": "call_0",
+        "content": "[interrupted: no tool result was recorded]",
+    }
+    result = await e.advance("continue")
+    assert result.answer == "resumed answer"
+    await e.aclose()
+
+
+async def test_resume_header_advances_past_completed_turn(monkeypatch, tmp_path):
+    # B3: the resume header is also written at the end of advance, so it reflects
+    # the completed turn (turn_offset == turns) instead of lagging one turn
+    # behind — otherwise a resume would re-do / under-count the last turn.
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.delenv("RLM_DEPTH", raising=False)
+    monkeypatch.delenv("RLM_MAX_DEPTH", raising=False)
+    import json
+
+    from rlm.engine import RLMEngine
+    from rlm.session import Session
+
+    sdir = tmp_path / "agent"
+    e = RLMEngine(
+        session=Session(sdir),
+        client=DummyClient([DummyMessage(content="answer")]),
+    )
+    await e.run("task")
+    meta = json.loads((sdir / "meta.json").read_text())
+    assert meta["turn_offset"] == meta["turns"] == 1

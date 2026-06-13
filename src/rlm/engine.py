@@ -305,6 +305,10 @@ class RLMEngine:
         if state:
             self._metrics = RLMMetrics.restore(state)
             self._metrics._sub_rlm_enabled = self.max_depth > 0
+        # If the saved view ended mid-turn (assistant tool_calls with no results —
+        # a crash between the two records), answer them before appending the
+        # warning so the resumed sequence is valid (B1).
+        self._answer_dangling_tool_calls()
         self._record_message(
             {"role": "user", "content": KERNEL_RESET_RESUME_WARNING},
             turn=self._turn_offset,
@@ -327,6 +331,11 @@ class RLMEngine:
         if self._turn_offset == 0:
             self.session.write_meta(prompt_preview=prompt[:200])
 
+        # A prior turn can stop (token budget) right after the assistant's
+        # tool_calls are recorded but before their results; answer them so this
+        # new user turn doesn't make an invalid (400) sequence (B1).
+        self._answer_dangling_tool_calls()
+
         # Alias the instance list so the loop body (and _compact_branch's in-place
         # messages[:] = ...) mutate the persisted conversation directly.
         messages = self._messages
@@ -347,19 +356,8 @@ class RLMEngine:
         for local_turn in itertools.count():
             turn = self._turn_offset + local_turn
             self._write_resume_header(turn)
-            # Call LLM
-            request_kwargs = {
-                "model": self.model,
-                "messages": messages,
-            }
-            if active_tools:
-                request_kwargs["tools"] = active_tools
-                request_kwargs["parallel_tool_calls"] = False
             try:
-                response = await call_with_retries(
-                    self.client.chat.completions.create,
-                    **request_kwargs,
-                )
+                response = await self._request_completion(messages, active_tools)
             except BadRequestError as e:
                 if not _is_request_too_large(e):
                     raise
@@ -368,46 +366,15 @@ class RLMEngine:
                 break
 
             usage = extract_usage(response)
-            self._total_usage.prompt_tokens += usage.prompt_tokens
-            self._total_usage.completion_tokens += usage.completion_tokens
-            self._last_prompt_tokens = usage.prompt_tokens
-
-            # Record root usage and assistant-visible context for this turn.
-            self._metrics.note_root_usage(
-                self._total_usage.prompt_tokens,
-                self._total_usage.completion_tokens,
-            )
-            self._metrics.note_assistant_turn(
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                prev_appended_role=last_appended_role,
-            )
-
-            # Update metrics
-            self._metrics.turns = turn + 1
-            self._metrics.turns_since_last_compaction = (
-                turn + 1 - self._branch_start_turn
-            )
+            self._note_turn_usage(usage, turn, last_appended_role)
 
             msg = response.choices[0].message
             msg_dict = msg.model_dump(exclude_none=True)
             msg_dict.setdefault("content", "")
             self._record_message(msg_dict, turn=turn)
 
-            # Parse tool-call args once; the error branches below reuse them.
-            tool_calls_log: list[dict] | None = None
-            parsed_args: list[dict | None] = []
-            if msg.tool_calls:
-                tool_calls_log = []
-                for tc in msg.tool_calls:
-                    args, err = _parse_tool_call_args(tc.function.arguments)
-                    parsed_args.append(args)
-                    tool_calls_log.append(
-                        {
-                            "name": tc.function.name,
-                            "args": err if args is None else args,
-                        }
-                    )
+            # Parse each tool call's JSON args once; the error branches reuse them.
+            parsed_args, tool_calls_log = self._parse_tool_calls(msg)
 
             if msg.tool_calls and len(msg.tool_calls) > 1:
                 feedback = "Error: only one tool call per turn allowed"
@@ -449,30 +416,8 @@ class RLMEngine:
                 final_text = msg.content or ""
                 break
 
-            tc = msg.tool_calls[0]
-            tool_name = tc.function.name
-            tool_args = parsed_args[0]
-            t0 = time.time()
-            tool = get_builtin_tool(tool_name)
-            if tool is None:
-                tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
-            else:
-                tool_result = await asyncio.to_thread(
-                    tool.execute, tool_args, self._tool_context(messages)
-                )
-            duration = time.time() - t0
-            for event in tool_result.metric_events:
-                self._metrics.record(event)
-
-            result = tool_result.content
-
-            if self.max_output > 0 and len(result) > self.max_output:
-                result = result[: self.max_output] + "\n... [output truncated]"
-
-            self._record_message(
-                {"role": "tool", "tool_call_id": tc.id, "content": result},
-                turn=turn,
-                duration=duration,
+            await self._execute_tool_call(
+                msg.tool_calls[0], parsed_args[0], messages, turn
             )
             last_appended_role = "tool"
 
@@ -501,11 +446,112 @@ class RLMEngine:
 
         self._turn_offset = turn + 1
         self._final_text = final_text
+        # Persist the final state so a resume after a clean stop continues from
+        # the next turn with accurate usage / metrics — the per-turn header at the
+        # top of the loop only captured state through the previous turn (B3).
+        self._write_resume_header(self._turn_offset)
         return RLMResult(
             answer=final_text,
             session_dir=self.session.dir,
             usage=self._total_usage,
             turns=turn + 1,
+        )
+
+    def _answer_dangling_tool_calls(self) -> None:
+        """Answer any unanswered tool calls left at the tail of the transcript.
+
+        A turn can be cut off after the assistant's ``tool_calls`` are recorded
+        but before the tool results are — a token-budget stop on a tool-call
+        turn, or a hard crash mid-exec that a later resume reloads. Appending the
+        next user turn on top of that is an invalid OpenAI sequence (a 400), so
+        synthesize a tool result for each unanswered call first.
+        """
+        if not self._messages:
+            return
+        last = self._messages[-1]
+        if last.get("role") != "assistant":
+            return
+        for tc in last.get("tool_calls") or []:
+            self._record_message(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": "[interrupted: no tool result was recorded]",
+                },
+                turn=self._turn_offset,
+            )
+
+    async def _request_completion(self, messages: list[dict], active_tools: list[dict]):
+        """One chat-completion call for the current turn (with retries)."""
+        request_kwargs: dict = {"model": self.model, "messages": messages}
+        if active_tools:
+            request_kwargs["tools"] = active_tools
+            request_kwargs["parallel_tool_calls"] = False
+        return await call_with_retries(
+            self.client.chat.completions.create, **request_kwargs
+        )
+
+    def _note_turn_usage(
+        self, usage: TokenUsage, turn: int, last_appended_role: str | None
+    ) -> None:
+        """Fold one turn's token usage into the running totals and metrics."""
+        self._total_usage.prompt_tokens += usage.prompt_tokens
+        self._total_usage.completion_tokens += usage.completion_tokens
+        self._last_prompt_tokens = usage.prompt_tokens
+        self._metrics.note_root_usage(
+            self._total_usage.prompt_tokens, self._total_usage.completion_tokens
+        )
+        self._metrics.note_assistant_turn(
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            prev_appended_role=last_appended_role,
+        )
+        self._metrics.turns = turn + 1
+        self._metrics.turns_since_last_compaction = turn + 1 - self._branch_start_turn
+
+    def _parse_tool_calls(self, msg) -> tuple[list[dict | None], list[dict] | None]:
+        """Parse each tool call's JSON arguments once.
+
+        Returns ``(parsed_args, tool_calls_log)`` aligned with ``msg.tool_calls``,
+        or ``([], None)`` when the turn made no tool calls. ``parsed_args[i]`` is
+        ``None`` when call ``i``'s arguments were invalid JSON; the matching log
+        entry then carries the parse error.
+        """
+        if not msg.tool_calls:
+            return [], None
+        parsed_args: list[dict | None] = []
+        tool_calls_log: list[dict] = []
+        for tc in msg.tool_calls:
+            args, err = _parse_tool_call_args(tc.function.arguments)
+            parsed_args.append(args)
+            tool_calls_log.append(
+                {"name": tc.function.name, "args": err if args is None else args}
+            )
+        return parsed_args, tool_calls_log
+
+    async def _execute_tool_call(
+        self, tc, tool_args: dict | None, messages: list[dict], turn: int
+    ) -> None:
+        """Dispatch one tool call and record its (possibly truncated) result."""
+        tool_name = tc.function.name
+        t0 = time.time()
+        tool = get_builtin_tool(tool_name)
+        if tool is None:
+            tool_result = ToolOutcome(content=f"Error: unknown tool '{tool_name}'")
+        else:
+            tool_result = await asyncio.to_thread(
+                tool.execute, tool_args, self._tool_context(messages)
+            )
+        duration = time.time() - t0
+        for event in tool_result.metric_events:
+            self._metrics.record(event)
+        result = tool_result.content
+        if self.max_output > 0 and len(result) > self.max_output:
+            result = result[: self.max_output] + "\n... [output truncated]"
+        self._record_message(
+            {"role": "tool", "tool_call_id": tc.id, "content": result},
+            turn=turn,
+            duration=duration,
         )
 
     async def aclose(self) -> None:
