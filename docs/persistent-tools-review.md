@@ -21,14 +21,14 @@ Line numbers are as of the reviewed commit and will drift.
 | B4 | MED-HIGH | **fixed** | Torn last line in `messages.jsonl` permanently wedges resume |
 | B5 | MEDIUM | **mostly fixed** | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
 | B6 | MEDIUM | **fixed** | Non-int / empty cap env vars crash on the hot path instead of disabling the cap |
-| B7 | MEDIUM | open | `max_tokens` clamp diverges from the documented formula for `0` / negative |
+| B7 | MEDIUM | **fixed** | `max_tokens` clamp diverges from the documented formula for `0` / negative |
 | B8 | LOW | **fixed** | `close()` never sets a terminal status |
 | B9 | LOW | **fixed** | `submit()` has no guard against an ended/closing worker (latent) |
 | B10 | LOW | **fixed** | `turn_offset` off-by-one on resume (same root cause as B3) |
-| B11 | LOW | open | Mid-compaction crash can re-open a `branch_reset`-closed view on disk |
+| B11 | LOW | **fixed** | Mid-compaction crash can re-open a `branch_reset`-closed view on disk |
 | B12 | LOW | **fixed** | `asyncio.get_event_loop()` in `_drain_agents` is deprecated |
-| B13 | LOW | open | Errored resident workers are never evicted from the registry |
-| B14 | LOW | open | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
+| B13 | LOW | **fixed** | Errored resident workers are never evicted from the registry |
+| B14 | LOW | **fixed** | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
 
 ## Re-check after the config + architecture passes
 
@@ -49,8 +49,20 @@ Implemented (see commits on this branch):
   drain-timeout kernel-restart orphan edge remains), **B6** (tolerant caps), **B12**
   (`get_running_loop`).
 
-Still open (all LOW/MED): **B7** (`max_tokens` 0 / negative), **B11** (mid-compaction
-crash view bookkeeping), **B13** (errored-worker eviction), **B14** (doc wording).
+- **B7** → a non-positive `max_tokens` is treated as "no explicit budget" (uses the
+  ceiling / no limit) instead of disabling the budget (`0`) or stopping after one turn
+  (negative); normalized in both `send` and the engine.
+- **B11** → `_resume` derives the view from the loaded content (`load_latest_view` returns
+  `(view, msgs)`), so a stale meta.json can't re-open a `branch_reset`-closed branch.
+  Residual: a cosmetic orphaned `branch_reset` log line is still possible if a hard crash
+  lands in the sub-millisecond gap between two compaction writes (offline analysis only).
+- **B13** → re-sending an errored name evicts the dead worker and rebuilds fresh
+  (restart / resume), keeping the name reusable and the registry bounded.
+- **B14** → skills' `.send` mirrors `run`'s signature + docstring; the `send` docstring no
+  longer calls the uuid auto-name "deterministic"; the design-doc claim is corrected.
+
+Remaining: only the **B5** drain-timeout → kernel-restart orphan edge; the rest of the
+review is addressed.
 
 ---
 
