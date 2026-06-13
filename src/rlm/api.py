@@ -19,11 +19,16 @@ from rlm.session import Session, _sanitize_name
 from rlm.types import RLMResult
 
 
+def _is_subagent() -> bool:
+    """True below the root rollout (depth > 0), so this agent counts against the
+    live-agent caps; the root rollout (depth 0) is uncapped."""
+    return int(os.environ.get("RLM_DEPTH", "0")) > 0
+
+
 def _child_session(name: str | None = None) -> Session | None:
     """If inside a parent session (depth > 0), create a child under it."""
     parent_dir = os.environ.get("RLM_SESSION_DIR")
-    depth = int(os.environ.get("RLM_DEPTH", "0"))
-    if parent_dir and depth > 0:
+    if parent_dir and _is_subagent():
         return Session(Session.child_dir(parent_dir, name=name))
     return None
 
@@ -40,7 +45,7 @@ async def run(prompt: str, **kwargs) -> RLMResult:
         if child:
             kwargs["session"] = child
     total_marker = running_marker = None
-    if int(os.environ.get("RLM_DEPTH", "0")) > 0:
+    if _is_subagent():
         total_marker = await acquire_slot_blocking(TOTAL)
         running_marker = await acquire_slot_blocking(RUNNING)
     try:
@@ -87,7 +92,8 @@ class _RlmProcessor:
                     kwargs.setdefault("session", self._session)
                 self._engine = RLMEngine(**kwargs)
                 self._engine.setup()
-            running_marker = await acquire_slot_blocking(RUNNING)
+            if _is_subagent():
+                running_marker = await acquire_slot_blocking(RUNNING)
             return await self._engine.advance(prompt)
         except Exception:
             await self._reap()  # any failure (construct/setup/advance) reaps it
@@ -146,7 +152,7 @@ def send(
     # the processor.
     is_new = name is None or _REGISTRY.get(name) is None
     total_marker = None
-    if is_new:
+    if is_new and _is_subagent():
         granted, total_marker = acquire_slot(TOTAL)
         if not granted:
             raise AgentLimitReached(
