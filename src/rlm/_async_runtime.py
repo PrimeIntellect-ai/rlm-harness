@@ -86,12 +86,13 @@ class FnProcessor:
 
 
 class BackgroundWorker:
-    """A per-name background task draining an inbox sequentially.
+    """A background task that runs a processor on the kernel loop.
 
-    Lives for the worker's lifetime on the kernel loop: parked on ``_wake`` when
-    idle, running the processor when items arrive. An exception from the
-    processor halts the worker (terminal ``ERROR`` state); the live exception is
-    surfaced via :attr:`error`.
+    Two lifecycles, selected by the ``item`` constructor arg: a *resident* worker
+    drains an inbox sequentially and parks on ``_wake`` when idle (named rlm
+    agents); an *ephemeral* worker runs its single item once and ends (general
+    tools). A processor exception halts the worker in ``ERROR`` state, surfaced
+    to the model via ``poll().error``.
     """
 
     def __init__(
@@ -104,24 +105,20 @@ class BackgroundWorker:
     ):
         self.name = name
         self.session_dir = session_dir
-        self.queued: list = []
         self.results: deque = deque()
         self._processor = processor
         self._error: BaseException | None = None
         self._wake = asyncio.Event()
         self._progress = asyncio.Event()
         self._closing = False
-        if item is _NO_ITEM:
-            # Resident worker (named rlm agent): drains an inbox across
-            # successive sends; stays alive until close().
-            self._status = FINISHED
-            self._task: asyncio.Future = asyncio.ensure_future(self._drain())
-        else:
-            # Ephemeral worker (general tool): runs one call to completion, then
-            # the task ends. Owned solely by its Handle — never registered — so
-            # it and its result are GC'd once the model drops the handle.
-            self._status = RUNNING
-            self._task = asyncio.ensure_future(self._run_once(item))
+        # A resident worker (named rlm agent) starts empty and parks for more
+        # sends until close(); an ephemeral worker (general tool) is created with
+        # its one item and ends as soon as the inbox drains — it lives only as
+        # long as its Handle, never registered, so it's GC'd when dropped.
+        self._ephemeral = item is not _NO_ITEM
+        self.queued: list = [item] if self._ephemeral else []
+        self._status = RUNNING if self._ephemeral else FINISHED
+        self._task: asyncio.Future = asyncio.ensure_future(self._drain())
 
     @property
     def status(self) -> str:
@@ -144,6 +141,8 @@ class BackgroundWorker:
         while not self._closing:
             if not self.queued:
                 self._status = FINISHED
+                if self._ephemeral:
+                    return  # one-shot: its item is done, let the task end
                 self._wake.clear()
                 if self.queued or self._closing:  # re-check after clear
                     continue
@@ -162,20 +161,6 @@ class BackgroundWorker:
                 return
             self.results.append(result)
             self._progress.set()
-
-    async def _run_once(self, item: Any) -> None:
-        """Run one item to completion for an ephemeral worker, then end."""
-        try:
-            result = await self._processor.process(item)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # surfaced to the model via poll()/wait()
-            self._error = exc
-            self._status = ERROR
-        else:
-            self.results.append(result)
-            self._status = FINISHED
-        self._progress.set()
 
     async def wait(self) -> Any:
         """Await and return the next result (consumes it); raise if the worker errors."""
