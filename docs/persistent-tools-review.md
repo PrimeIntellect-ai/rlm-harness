@@ -15,16 +15,16 @@ Line numbers are as of the reviewed commit and will drift.
 |----|----------|-----------|
 | ID | Severity | Status | One-liner |
 |----|----------|--------|-----------|
-| B1 | HIGH | open | Dangling assistant `tool_calls` → invalid message sequence → API 400 |
+| B1 | HIGH | **fixed** | Dangling assistant `tool_calls` → invalid message sequence → API 400 |
 | B2 | HIGH | **fixed** | TOTAL-slot leak in `run()` — acquires sit outside the `try/finally` |
-| B3 | HIGH | open | Resume header written at turn *start* → resumed agent undercounts usage/metrics |
+| B3 | HIGH | **fixed** | Resume header written at turn *start* → resumed agent undercounts usage/metrics |
 | B4 | MED-HIGH | **fixed** | Torn last line in `messages.jsonl` permanently wedges resume |
 | B5 | MEDIUM | **mostly fixed** | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
 | B6 | MEDIUM | **fixed** | Non-int / empty cap env vars crash on the hot path instead of disabling the cap |
 | B7 | MEDIUM | open | `max_tokens` clamp diverges from the documented formula for `0` / negative |
 | B8 | LOW | **fixed** | `close()` never sets a terminal status |
 | B9 | LOW | **fixed** | `submit()` has no guard against an ended/closing worker (latent) |
-| B10 | LOW | open | `turn_offset` off-by-one on resume (same root cause as B3) |
+| B10 | LOW | **fixed** | `turn_offset` off-by-one on resume (same root cause as B3) |
 | B11 | LOW | open | Mid-compaction crash can re-open a `branch_reset`-closed view on disk |
 | B12 | LOW | **fixed** | `asyncio.get_event_loop()` in `_drain_agents` is deprecated |
 | B13 | LOW | open | Errored resident workers are never evicted from the registry |
@@ -41,17 +41,16 @@ Implemented (see commits on this branch):
   into `worker_factory`; fixes **B2**.
 - **Macro #8 (`BackgroundWorker` lifecycle)** → terminal status on `close()` + `submit()`
   guard (**B8**, **B9**); kept the `_ephemeral` flag (commented) rather than a full split.
+- **Macro #7 (`advance()` decomposition)** → extracted `_request_completion`,
+  `_note_turn_usage`, `_parse_tool_calls`, `_execute_tool_call`; fixes **B1** (answer
+  unanswered tool calls before the next user turn) and **B3** / **B10** (write the resume
+  header at end-of-advance, not only at turn start).
 - **B4** (torn-line tolerance), **B5** (teardown off the loop + logged; *partial* — the
   drain-timeout kernel-restart orphan edge remains), **B6** (tolerant caps), **B12**
   (`get_running_loop`).
 
-Deferred:
-
-- **Macro #7 (`advance()` decomposition)** — left to do alongside B1/B3, which live in the
-  same loop.
-
-Still open: **B1**, **B3** (both HIGH; the message-sequence / resume-header logic in
-`advance()`/`_resume`), **B7**, **B10**, **B11**, **B13**, **B14**.
+Still open (all LOW/MED): **B7** (`max_tokens` 0 / negative), **B11** (mid-compaction
+crash view bookkeeping), **B13** (errored-worker eviction), **B14** (doc wording).
 
 ---
 
