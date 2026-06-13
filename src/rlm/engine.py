@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -26,6 +27,12 @@ from rlm.tools import (
     get_installed_skills,
 )
 from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
+
+
+# Wall-clock budget for the teardown drain cell (close_all_registries running in
+# the kernel where the child registries live). Bounds how long a wedged child can
+# stall a parent's teardown.
+_DRAIN_TIMEOUT_SECONDS = 120
 
 
 # Injected as a user message when the branch's context size reaches the
@@ -521,11 +528,18 @@ class RLMEngine:
                 # wedged child must not block the parent from finalizing.
                 if self._repl is not None and self.max_depth > 0:
                     try:
-                        self._repl.execute(
-                            "import rlm.api as _rlm; _rlm._drain_agents()", timeout=120
+                        # Run off the event loop: the drain cell blocks on the
+                        # child kernel, and a synchronous call here would stall
+                        # this agent's loop (and its siblings) meanwhile.
+                        await asyncio.to_thread(
+                            self._repl.execute,
+                            "import rlm.api as _rlm; _rlm._drain_agents()",
+                            timeout=_DRAIN_TIMEOUT_SECONDS,
                         )
                     except Exception:
-                        pass
+                        logging.getLogger(__name__).warning(
+                            "sub-agent drain failed during teardown", exc_info=True
+                        )
                 self.session.finalize(
                     self._final_text,
                     usage={
@@ -537,7 +551,7 @@ class RLMEngine:
                 )
         finally:
             if self._repl is not None:
-                self._repl.shutdown()
+                await asyncio.to_thread(self._repl.shutdown)
                 self._repl = None
 
     async def _compact_branch(
