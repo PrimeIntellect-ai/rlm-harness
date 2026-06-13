@@ -172,12 +172,19 @@ def send(
             holder.get("session"), engine_kwargs, total_marker=total_marker
         )
 
-    return _REGISTRY.send(
-        prompt,
-        name=name,
-        processor_factory=processor_factory,
-        session_dir_factory=session_dir_factory,
-    )
+    try:
+        return _REGISTRY.send(
+            prompt,
+            name=name,
+            processor_factory=processor_factory,
+            session_dir_factory=session_dir_factory,
+        )
+    except Exception:
+        # Registration failed before the processor took ownership of the slot
+        # (e.g. creating the child session raised); release it here so a partial
+        # failure doesn't permanently consume the cap.
+        release_slot(total_marker)
+        raise
 
 
 def _drain_agents() -> None:

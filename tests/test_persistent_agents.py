@@ -169,6 +169,33 @@ async def test_construction_failure_frees_total_slot(monkeypatch, tmp_path):
     await api._REGISTRY.close_all()
 
 
+async def test_registration_failure_frees_total_slot(monkeypatch, tmp_path):
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.setenv("RLM_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_DEPTH", "1")
+    monkeypatch.setenv("RLM_MAX_LIVE_AGENTS", "1")
+    monkeypatch.setenv("RLM_LIVE_AGENTS_DIR", str(tmp_path / ".live_agents"))
+    from rlm import api
+
+    # Child-session creation raises *inside* _REGISTRY.send — after send() has
+    # already reserved the total slot, on the path the processor teardown can't
+    # reach to release it.
+    def _boom(name=None):
+        raise OSError("boom")
+
+    original = api._child_session
+    monkeypatch.setattr(api, "_child_session", _boom)
+    with pytest.raises(OSError, match="boom"):
+        api.send("task a", name="a")
+    monkeypatch.setattr(api, "_child_session", original)
+
+    # the reserved slot was released despite the failure, so a new agent fits (cap=1)
+    h = api.send("task b", name="b", client=DummyClient([DummyMessage(content="b1")]))
+    assert (await h.wait()).answer == "b1"
+    await api._REGISTRY.close_all()
+
+
 async def test_one_off_run_waits_for_a_slot(monkeypatch, tmp_path):
     monkeypatch.setenv("RLM_TOOLS", "")
     monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
