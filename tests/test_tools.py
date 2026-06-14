@@ -126,3 +126,17 @@ def test_session_views_round_trip(tmp_path):
             {"role": "user", "content": "carries the summary"},
         ],
     )
+
+
+def test_load_latest_view_tolerates_torn_tail_with_blank_line(tmp_path):
+    # A crash can leave a torn final record followed by a trailing blank line;
+    # resume should still recover the valid records before it (not raise).
+    from rlm.session import Session
+
+    sdir = tmp_path / "s"
+    sdir.mkdir()
+    valid = '{"t": "msg", "view": 0, "turn": 0, "role": "user", "content": "hi"}\n'
+    torn = '{"t": "msg", "view": 0, "turn": 1, "role": "assistant"\n'  # no closing brace
+    (sdir / "messages.jsonl").write_text(valid + torn + "\n")  # trailing blank line
+
+    assert Session(sdir).load_latest_view() == (0, [{"role": "user", "content": "hi"}])

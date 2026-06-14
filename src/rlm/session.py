@@ -97,6 +97,11 @@ class Session:
             return 0, []
         with open(path) as f:
             lines = f.readlines()
+        # Drop trailing blank lines so a torn final record followed by a blank
+        # line (or a stray newline) is still recognized as the tail rather than
+        # mid-file corruption.
+        while lines and not lines[-1].strip():
+            lines.pop()
         msgs: list[dict] = []
         for i, raw in enumerate(lines):
             raw = raw.strip()

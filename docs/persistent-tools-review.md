@@ -31,6 +31,7 @@ Line numbers are as of the reviewed commit and will drift.
 | B14 | LOW | **fixed** | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
 | B15 | LOW | **fixed** | Depth-0 `send` shared the root session (no `sub-<name>`; `handle.session_dir` None) — external review |
 | B16 | LOW | **fixed** | Resume injected the IPython "kernel restarted" warning even for an agent with no REPL — external review |
+| B17 | MED | **fixed** | Torn-line resume recovery (B4) was too narrow: a torn final record + trailing blank line still raised — external review |
 
 ## Re-check after the config + architecture passes
 
@@ -74,6 +75,10 @@ Implemented (see commits on this branch):
   and `setup()` starts a fresh, empty REPL), contrary to the "kernel unchanged" premise.
   But a tools-only / chat-only agent (no REPL) was still told its "IPython session is brand
   new"; the warning is now gated on the engine having a REPL.
+- **B17** (external review — correct) → the B4 torn-line tolerance only dropped a corrupt
+  line when it was the last *physical* line, so a torn final record followed by a trailing
+  blank line raised `JSONDecodeError` and blocked resume. `load_latest_view` now drops
+  trailing blank lines before the tail check, so the torn record is recognized as the tail.
 
 Remaining: a hard drain timeout is now detected, logged, and flagged in meta, but
 orphaned descendant *kernels* (subprocesses left by a restarted child kernel) aren't
