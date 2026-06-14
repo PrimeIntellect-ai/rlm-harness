@@ -34,6 +34,12 @@ from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
 # stall a parent's teardown.
 DRAIN_TIMEOUT_SECONDS = 120
 
+# Printed by the drain cell on success. The REPL turns a cell timeout / error into
+# captured output rather than an exception, so teardown checks for this sentinel to
+# tell a completed drain from a wedged one (instead of finalizing as a clean
+# shutdown regardless).
+DRAIN_OK = "__rlm_drain_ok__"
+
 
 # Injected as a user message when the branch's context size reaches the
 # compaction threshold. The model's next reply is expected to be a
@@ -580,19 +586,14 @@ class RLMEngine:
                 # aggregate child metrics and shut the kernel down. Best-effort: a
                 # wedged child must not block the parent from finalizing.
                 if self._repl is not None and self.max_depth > 0:
-                    try:
-                        # Run off the event loop: the drain cell blocks on the
-                        # child kernel, and a synchronous call here would stall
-                        # this agent's loop (and its siblings) meanwhile.
-                        await asyncio.to_thread(
-                            self._repl.execute,
-                            "import rlm.api as _rlm; _rlm.drain_agents()",
-                            timeout=DRAIN_TIMEOUT_SECONDS,
-                        )
-                    except Exception:
+                    if not await self._drain_sub_agents():
                         logging.getLogger(__name__).warning(
-                            "sub-agent drain failed during teardown", exc_info=True
+                            "sub-agent drain did not complete within %ss during "
+                            "teardown; descendant kernels/sessions may remain open",
+                            DRAIN_TIMEOUT_SECONDS,
                         )
+                        # So finalize's metrics don't read as a clean shutdown.
+                        self.session.write_meta(teardown_drain_complete=False)
                 self.session.finalize(
                     self._final_text,
                     usage={
@@ -606,6 +607,31 @@ class RLMEngine:
             if self._repl is not None:
                 await asyncio.to_thread(self._repl.shutdown)
                 self._repl = None
+
+    async def _drain_sub_agents(self) -> bool:
+        """Drain this kernel's background sub-agents; ``True`` if it completed.
+
+        Runs a cell that closes the child registries — each child finalizes its
+        session and cascade-drains its own grandchildren — off the event loop, so
+        the blocking drain doesn't stall this agent's loop (and its siblings).
+
+        The REPL turns a cell timeout / error into captured output rather than an
+        exception, so a wedged or deep tree would otherwise look like a clean
+        shutdown. The cell prints ``DRAIN_OK`` only after the drain returns, so its
+        presence in the output distinguishes a completed drain from a timed-out one.
+        """
+        try:
+            out = await asyncio.to_thread(
+                self._repl.execute,
+                f"import rlm.api as _rlm; _rlm.drain_agents(); print({DRAIN_OK!r})",
+                timeout=DRAIN_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "sub-agent drain raised during teardown", exc_info=True
+            )
+            return False
+        return DRAIN_OK in out
 
     async def _compact_branch(
         self, messages: list[dict], turn: int, active_tools: list[dict]

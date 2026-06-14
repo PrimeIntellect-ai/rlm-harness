@@ -348,3 +348,25 @@ async def test_send_nests_its_own_session_even_at_depth_zero(monkeypatch, tmp_pa
     assert (await handle.wait()).answer == "hi"
 
     await api.REGISTRY.close_all()
+
+
+async def test_teardown_detects_incomplete_drain(tmp_path):
+    # The REPL turns a drain-cell timeout into output text (not an exception), so
+    # teardown must check the success sentinel rather than assume the drain ran.
+    from rlm.engine import DRAIN_OK, RLMEngine
+    from rlm.session import Session
+
+    engine = RLMEngine(session=Session(tmp_path / "s"), client=DummyClient([]))
+
+    class _StubRepl:
+        def __init__(self, out):
+            self.out = out
+
+        def execute(self, code, timeout=None):
+            return self.out
+
+    engine._repl = _StubRepl(f"some output\n{DRAIN_OK}\n")
+    assert await engine._drain_sub_agents() is True  # sentinel present -> completed
+
+    engine._repl = _StubRepl("[execution timed out after 120s and was interrupted]")
+    assert await engine._drain_sub_agents() is False  # no sentinel -> wedged

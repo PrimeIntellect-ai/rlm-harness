@@ -19,7 +19,7 @@ Line numbers are as of the reviewed commit and will drift.
 | B2 | HIGH | **fixed** | TOTAL-slot leak in `run()` — acquires sit outside the `try/finally` |
 | B3 | HIGH | **fixed** | Resume header written at turn *start* → resumed agent undercounts usage/metrics |
 | B4 | MED-HIGH | **fixed** | Torn last line in `messages.jsonl` permanently wedges resume |
-| B5 | MEDIUM | **mostly fixed** | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
+| B5 | MEDIUM | **fixed** | Teardown cascade blocks the loop, fixed 120 s, can orphan descendants, swallows errors |
 | B6 | MEDIUM | **fixed** | Non-int / empty cap env vars crash on the hot path instead of disabling the cap |
 | B7 | MEDIUM | **fixed** | `max_tokens` clamp diverges from the documented formula for `0` / negative |
 | B8 | LOW | **fixed** | `close()` never sets a terminal status |
@@ -46,8 +46,10 @@ Implemented (see commits on this branch):
   `_note_turn_usage`, `_parse_tool_calls`, `_execute_tool_call`; fixes **B1** (answer
   unanswered tool calls before the next user turn) and **B3** / **B10** (write the resume
   header at end-of-advance, not only at turn start).
-- **B4** (torn-line tolerance), **B5** (teardown off the loop + logged; *partial* — the
-  drain-timeout kernel-restart orphan edge remains), **B6** (tolerant caps), **B12**
+- **B4** (torn-line tolerance), **B5** (teardown off the loop + logged; and — after an
+  external re-flag — the drain cell now prints a success sentinel that teardown checks,
+  so a timed-out / wedged drain is logged and flagged `teardown_drain_complete=false`
+  instead of finalizing as a clean shutdown), **B6** (tolerant caps), **B12**
   (`get_running_loop`).
 
 - **B7** → a non-positive `max_tokens` is treated as "no explicit budget" (uses the
@@ -67,8 +69,10 @@ Implemented (see commits on this branch):
   `handle.session_dir` is set. Only reachable via a direct depth-0 `rlm.send(...)` (the
   model's `send` is always depth ≥ 1), so it was latent — but now consistent.
 
-Remaining: only the **B5** drain-timeout → kernel-restart orphan edge; the rest of the
-review is addressed.
+Remaining: a hard drain timeout is now detected, logged, and flagged in meta, but
+orphaned descendant *kernels* (subprocesses left by a restarted child kernel) aren't
+retroactively reaped — that's an OS-level process-tree cleanup left as future work. The
+rest of the review is addressed.
 
 ---
 
