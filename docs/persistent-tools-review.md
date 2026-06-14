@@ -29,6 +29,7 @@ Line numbers are as of the reviewed commit and will drift.
 | B12 | LOW | **fixed** | `asyncio.get_event_loop()` in `_drain_agents` is deprecated |
 | B13 | LOW | **fixed** | Errored resident workers are never evicted from the registry |
 | B14 | LOW | **fixed** | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
+| B15 | LOW | **fixed** | Depth-0 `send` shared the root session (no `sub-<name>`; `handle.session_dir` None) — external review |
 
 ## Re-check after the config + architecture passes
 
@@ -60,6 +61,11 @@ Implemented (see commits on this branch):
   (restart / resume), keeping the name reusable and the registry bounded.
 - **B14** → skills' `.send` mirrors `run`'s signature + docstring; the `send` docstring no
   longer calls the uuid auto-name "deterministic"; the design-doc claim is corrected.
+- **B15** (external review) → the depth gate moved from `child_session` to `run`'s call
+  site, so `send` nests a `sub-<name>` session under the current session dir at any depth
+  (including the root). A background agent no longer shares the root's `messages.jsonl`, and
+  `handle.session_dir` is set. Only reachable via a direct depth-0 `rlm.send(...)` (the
+  model's `send` is always depth ≥ 1), so it was latent — but now consistent.
 
 Remaining: only the **B5** drain-timeout → kernel-restart orphan edge; the rest of the
 review is addressed.

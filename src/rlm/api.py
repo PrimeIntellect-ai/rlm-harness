@@ -26,9 +26,16 @@ def is_subagent() -> bool:
 
 
 def child_session(name: str | None = None) -> Session | None:
-    """If inside a parent session (depth > 0), create a child under it."""
+    """Create a ``sub-<name>`` session under the current session dir.
+
+    Returns ``None`` when there is no current session dir (``RLM_SESSION_DIR``
+    unset) to nest under. The depth policy lives at the call site: a background
+    ``send`` agent always nests (it's a distinct child even when spawned from the
+    root), while ``run`` nests only for a sub-agent so the root rollout keeps
+    using its own session rather than nesting under it.
+    """
     parent_dir = get_config().session_dir
-    if parent_dir and is_subagent():
+    if parent_dir:
         return Session(Session.child_dir(parent_dir, name=name))
     return None
 
@@ -40,7 +47,9 @@ async def run(prompt: str, **kwargs) -> RLMResult:
     each (total, then running) — unlike ``send``, which raises on the total cap.
     The root rollout is not capped.
     """
-    if "session" not in kwargs:
+    # The root rollout (depth 0) keeps its own RLM_SESSION_DIR; only a sub-agent
+    # one-off nests under its parent.
+    if "session" not in kwargs and is_subagent():
         child = child_session()
         if child:
             kwargs["session"] = child

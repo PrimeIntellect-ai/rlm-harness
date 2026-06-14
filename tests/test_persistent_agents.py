@@ -327,3 +327,24 @@ async def test_resume_header_advances_past_completed_turn(monkeypatch, tmp_path)
     await e.run("task")
     meta = json.loads((sdir / "meta.json").read_text())
     assert meta["turn_offset"] == meta["turns"] == 1
+
+
+async def test_send_nests_its_own_session_even_at_depth_zero(monkeypatch, tmp_path):
+    # A named background agent is a distinct child even when spawned from the
+    # root (depth 0): it gets its own sub-<name> session instead of sharing the
+    # root's RLM_SESSION_DIR / messages.jsonl, and handle.session_dir is set.
+    monkeypatch.setenv("RLM_TOOLS", "")
+    monkeypatch.setenv("RLM_SESSION_DIR", str(tmp_path))
+    monkeypatch.delenv("RLM_DEPTH", raising=False)  # depth 0 (root)
+    monkeypatch.delenv("RLM_MAX_DEPTH", raising=False)
+    from rlm import api
+
+    handle = api.send(
+        "hello", name="bg", client=DummyClient([DummyMessage(content="hi")])
+    )
+    assert handle.session_dir is not None
+    assert handle.session_dir.name == "sub-bg"
+    assert handle.session_dir.parent == tmp_path  # nested under root, not shared
+    assert (await handle.wait()).answer == "hi"
+
+    await api.REGISTRY.close_all()
