@@ -30,6 +30,7 @@ Line numbers are as of the reviewed commit and will drift.
 | B13 | LOW | **fixed** | Errored resident workers are never evicted from the registry |
 | B14 | LOW | **fixed** | Doc/wording: signature-mirroring claim, "deterministic" auto-name |
 | B15 | LOW | **fixed** | Depth-0 `send` shared the root session (no `sub-<name>`; `handle.session_dir` None) — external review |
+| B16 | LOW | **fixed** | Resume injected the IPython "kernel restarted" warning even for an agent with no REPL — external review |
 
 ## Re-check after the config + architecture passes
 
@@ -68,6 +69,11 @@ Implemented (see commits on this branch):
   (including the root). A background agent no longer shares the root's `messages.jsonl`, and
   `handle.session_dir` is set. Only reachable via a direct depth-0 `rlm.send(...)` (the
   model's `send` is always depth ≥ 1), so it was latent — but now consistent.
+- **B16** (external review) → the resume warning is *accurate* for a REPL agent (every
+  resume path follows a genuine kernel teardown — reap/`aclose` or a parent-kernel restart —
+  and `setup()` starts a fresh, empty REPL), contrary to the "kernel unchanged" premise.
+  But a tools-only / chat-only agent (no REPL) was still told its "IPython session is brand
+  new"; the warning is now gated on the engine having a REPL.
 
 Remaining: a hard drain timeout is now detected, logged, and flagged in meta, but
 orphaned descendant *kernels* (subprocesses left by a restarted child kernel) aren't

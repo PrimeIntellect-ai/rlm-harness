@@ -251,7 +251,8 @@ async def test_engine_resumes_from_disk(monkeypatch, tmp_path):
     contents = [m.get("content") for m in e2._messages]
     assert e2._messages[0]["role"] == "system"
     assert "original task" in contents  # prior turn restored from disk
-    assert any("kernel was restarted" in (c or "") for c in contents)  # warned
+    # no REPL here (RLM_TOOLS=""), so no IPython kernel-reset warning is injected
+    assert not any("kernel was restarted" in (c or "") for c in contents)
 
     result = await e2.advance("follow-up")
     assert result.answer == "second answer"  # continues with the restored context
@@ -370,3 +371,28 @@ async def test_teardown_detects_incomplete_drain(tmp_path):
 
     engine._repl = _StubRepl("[execution timed out after 120s and was interrupted]")
     assert await engine._drain_sub_agents() is False  # no sentinel -> wedged
+
+
+def test_resume_warns_only_with_repl(tmp_path):
+    # The kernel-reset warning is about lost in-memory REPL state, so it's only
+    # injected when the resumed engine actually has a REPL.
+    from rlm.engine import KERNEL_RESET_RESUME_WARNING, RLMEngine
+    from rlm.session import Session
+
+    prior = [{"role": "system", "content": "s"}, {"role": "user", "content": "t"}]
+
+    with_repl = RLMEngine(session=Session(tmp_path / "a"), client=DummyClient([]))
+    with_repl._repl = object()  # stand-in for a freshly started REPL
+    with_repl._resume(0, prior)
+    assert any(
+        KERNEL_RESET_RESUME_WARNING in (m.get("content") or "")
+        for m in with_repl._messages
+    )
+
+    no_repl = RLMEngine(session=Session(tmp_path / "b"), client=DummyClient([]))
+    no_repl._repl = None
+    no_repl._resume(0, prior)
+    assert not any(
+        KERNEL_RESET_RESUME_WARNING in (m.get("content") or "")
+        for m in no_repl._messages
+    )

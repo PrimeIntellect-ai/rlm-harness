@@ -291,11 +291,14 @@ class RLMEngine:
         )
 
     def _resume(self, view: int, prior_messages: list[dict]) -> None:
-        """Continue an agent whose in-memory engine was lost to a kernel restart.
+        """Continue an agent whose in-memory engine was lost (a kernel restart,
+        or a reap + same-name restart).
 
         Loads the last on-disk view as ``_messages`` and restores the resume
-        header from meta.json, then injects a kernel-reset warning: the
-        conversation survived but the REPL is brand new.
+        header from meta.json. Every path here follows a genuine teardown of the
+        previous engine's kernel, and ``setup()`` has already started a fresh,
+        empty REPL — so when this engine has one, it injects a kernel-reset
+        warning that the conversation survived but the REPL is brand new.
         """
         self._messages = list(prior_messages)
         # The loaded content's view is authoritative — it always matches
@@ -322,10 +325,14 @@ class RLMEngine:
         # a crash between the two records), answer them before appending the
         # warning so the resumed sequence is valid (B1).
         self._answer_dangling_tool_calls()
-        self._record_message(
-            {"role": "user", "content": KERNEL_RESET_RESUME_WARNING},
-            turn=self._turn_offset,
-        )
+        # The warning is about lost in-memory REPL state, so only inject it when
+        # this engine actually has a REPL — a tools-only / chat-only agent has no
+        # IPython session to recreate.
+        if self._repl is not None:
+            self._record_message(
+                {"role": "user", "content": KERNEL_RESET_RESUME_WARNING},
+                turn=self._turn_offset,
+            )
 
     async def advance(self, prompt: str) -> RLMResult:
         """Append a user turn and run the loop until the model stops calling tools.
