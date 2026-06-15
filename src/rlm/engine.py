@@ -207,8 +207,10 @@ class RLMEngine:
 
     async def run(self, prompt: str) -> RLMResult:
         """Run a single agent loop to completion (setup + one advance + close)."""
-        self.setup()
         try:
+            # Inside the try so a setup() failure after the kernel starts (e.g. a
+            # corrupt transcript on resume) still hits aclose() and shuts it down.
+            self.setup()
             return await self.advance(prompt)
         finally:
             await self.aclose()

@@ -373,6 +373,29 @@ async def test_teardown_detects_incomplete_drain(tmp_path):
     assert await engine._drain_sub_agents() is False  # no sentinel -> wedged
 
 
+async def test_run_closes_engine_when_setup_fails(tmp_path):
+    # setup() starts the kernel before steps that can raise (e.g. a corrupt
+    # transcript on resume); run() must still call aclose() so the kernel/REPL is
+    # shut down rather than leaked.
+    from rlm.engine import RLMEngine
+    from rlm.session import Session
+
+    e = RLMEngine(session=Session(tmp_path / "s"), client=DummyClient([]))
+    closed = []
+
+    def boom_setup():
+        raise RuntimeError("setup boom")
+
+    async def record_aclose():
+        closed.append(True)
+
+    e.setup = boom_setup
+    e.aclose = record_aclose
+    with pytest.raises(RuntimeError, match="setup boom"):
+        await e.run("task")
+    assert closed == [True]  # aclose ran despite setup raising
+
+
 def test_resume_warns_only_with_repl(tmp_path):
     # The kernel-reset warning is about lost in-memory REPL state, so it's only
     # injected when the resumed engine actually has a REPL.
