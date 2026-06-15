@@ -32,6 +32,7 @@ Line numbers are as of the reviewed commit and will drift.
 | B15 | LOW | **fixed** | Depth-0 `send` shared the root session (no `sub-<name>`; `handle.session_dir` None) — external review |
 | B16 | LOW | **fixed** | Resume injected the IPython "kernel restarted" warning even for an agent with no REPL — external review |
 | B17 | MED | **fixed** | Torn-line resume recovery (B4) was too narrow: a torn final record + trailing blank line still raised — external review |
+| B18 | MED | **fixed** | Crash mid-compaction could resume from a lone-system new branch, losing the conversation (B11 area) — external review |
 
 ## Re-check after the config + architecture passes
 
@@ -79,6 +80,15 @@ Implemented (see commits on this branch):
   line when it was the last *physical* line, so a torn final record followed by a trailing
   blank line raised `JSONDecodeError` and blocked resume. `load_latest_view` now drops
   trailing blank lines before the tail check, so the torn record is recognized as the tail.
+- **B18** (external review — B11 area) → compaction writes `branch_reset(V)` then seeds the
+  new view as two lines (`system`, then `user(summary)`). The flagged window (branch_reset
+  written, new view empty) is benign — resume loads the complete pre-compaction branch V and
+  re-compacts. But the *adjacent* window (system line written, `user(summary)` not) left the
+  new view as a lone `system` message, and `load_latest_view` picked it → the whole
+  conversation was lost. It now falls back to the previous complete branch when the latest
+  view is a lone-system interrupted seed (reconstructing the exact compacted state would need
+  session↔engine coupling for negligible benefit, given both windows are sub-millisecond and
+  self-heal).
 
 Remaining: a hard drain timeout is now detected, logged, and flagged in meta, but
 orphaned descendant *kernels* (subprocesses left by a restarted child kernel) aren't

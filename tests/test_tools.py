@@ -140,3 +140,26 @@ def test_load_latest_view_tolerates_torn_tail_with_blank_line(tmp_path):
     (sdir / "messages.jsonl").write_text(valid + torn + "\n")  # trailing blank line
 
     assert Session(sdir).load_latest_view() == (0, [{"role": "user", "content": "hi"}])
+
+
+def test_load_latest_view_skips_incomplete_compaction_seed(tmp_path):
+    # A crash between branch_reset and writing the new branch's user(summary) can
+    # leave the new view with only its system message; resume must fall back to
+    # the previous complete branch, not a lone system prompt (which loses the
+    # whole conversation).
+    from rlm.session import Session
+
+    sdir = tmp_path / "s"
+    sdir.mkdir()
+    lines = [
+        '{"t": "msg", "view": 0, "turn": 0, "role": "system", "content": "sys"}',
+        '{"t": "msg", "view": 0, "turn": 0, "role": "user", "content": "task"}',
+        '{"t": "msg", "view": 0, "turn": 1, "role": "assistant", "content": "summary"}',
+        '{"t": "branch_reset", "view": 0, "dropped_chars": 1, "summary_chars": 1, "turns_since": 1}',
+        '{"t": "msg", "view": 1, "turn": 1, "role": "system", "content": "sys"}',  # lone system
+    ]
+    (sdir / "messages.jsonl").write_text("\n".join(lines) + "\n")
+
+    view, msgs = Session(sdir).load_latest_view()
+    assert view == 0  # fell back to the complete pre-compaction branch
+    assert any(m.get("content") == "task" for m in msgs)  # conversation not lost

@@ -124,8 +124,23 @@ class Session:
                 msgs.append(obj)
         if not msgs:
             return 0, []
-        latest = max(m.get("view", 0) for m in msgs)
-        return latest, [strip_msg(m) for m in msgs if m.get("view", 0) == latest]
+        views = sorted({m.get("view", 0) for m in msgs})
+        latest = views[-1]
+        latest_msgs = [m for m in msgs if m.get("view", 0) == latest]
+        # A crash mid-compaction can leave the new branch with only its system
+        # message (the user(summary) seed not yet written). Resuming from that
+        # lone system prompt would drop the whole conversation, so fall back to
+        # the previous, complete branch — the next turn re-compacts. Views above 0
+        # exist only because compaction created them, and it always seeds
+        # [system, user(summary)], so a lone system there is an interrupted seed.
+        if (
+            len(views) > 1
+            and len(latest_msgs) == 1
+            and latest_msgs[0].get("role") == "system"
+        ):
+            latest = views[-2]
+            latest_msgs = [m for m in msgs if m.get("view", 0) == latest]
+        return latest, [strip_msg(m) for m in latest_msgs]
 
     def aggregate_child_metrics(self) -> ChildSessionAggregate:
         """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
