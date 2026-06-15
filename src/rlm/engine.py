@@ -577,13 +577,14 @@ class RLMEngine:
         )
 
     async def aclose(self) -> None:
-        """Finalize the session and shut the kernel down.
+        """Finalize the session, shut the kernel down, and close the session handle.
 
-        Idempotent. A no-op if the engine never set up (e.g. depth-limited). If
-        setup() failed partway after starting the kernel, the kernel is still shut
-        down — finalize is skipped, since there is no completed run to finalize.
+        Idempotent. A no-op only when nothing was opened (e.g. depth-limited with
+        no session). When setup() failed partway, finalize is skipped (no completed
+        run to finalize) but the kernel and the session's ``messages.jsonl`` handle
+        are still closed.
         """
-        if not self._setup_done and self._repl is None:
+        if self.session is None and self._repl is None:
             return
         finalize = self._setup_done
         self._setup_done = False
@@ -616,6 +617,11 @@ class RLMEngine:
             if self._repl is not None:
                 await asyncio.to_thread(self._repl.shutdown)
                 self._repl = None
+            # Close the messages.jsonl handle on every path (finalize already
+            # closed it on the clean path; close() is idempotent) so a partial
+            # setup doesn't leak the fd.
+            if self.session is not None:
+                self.session.close()
 
     async def _drain_sub_agents(self) -> bool:
         """Drain this kernel's background sub-agents; ``True`` if it completed.

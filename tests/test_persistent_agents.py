@@ -396,6 +396,20 @@ async def test_run_closes_engine_when_setup_fails(tmp_path):
     assert closed == [True]  # aclose ran despite setup raising
 
 
+async def test_aclose_closes_session_on_partial_setup(tmp_path):
+    # A partial setup (session opened, no REPL — e.g. RLM_TOOLS="" or a failure
+    # before the kernel starts) must still close the session's messages.jsonl
+    # handle rather than leak the fd.
+    from rlm.engine import RLMEngine
+    from rlm.session import Session
+
+    sess = Session(tmp_path / "s")  # opens messages.jsonl
+    e = RLMEngine(session=sess, client=DummyClient([]))
+    assert not sess._msg_file.closed
+    await e.aclose()  # engine never completed setup and has no REPL
+    assert sess._msg_file.closed
+
+
 def test_resume_warns_only_with_repl(tmp_path):
     # The kernel-reset warning is about lost in-memory REPL state, so it's only
     # injected when the resumed engine actually has a REPL.
