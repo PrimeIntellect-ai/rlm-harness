@@ -42,13 +42,10 @@ ensure_command() {
 }
 
 install_uv() {
-    local installer="/tmp/rlm-uv-install.sh"
-    if ! curl -LsSf https://astral.sh/uv/install.sh -o "$installer"; then
+    if ! curl -LsSf https://astral.sh/uv/install.sh | sh; then
         install_system_packages ca-certificates
-        curl -LsSf https://astral.sh/uv/install.sh -o "$installer"
+        curl -LsSf https://astral.sh/uv/install.sh | sh
     fi
-    sh "$installer"
-    rm -f "$installer"
 }
 
 python_supports_rlm() {
