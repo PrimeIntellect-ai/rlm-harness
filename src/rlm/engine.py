@@ -505,7 +505,6 @@ class RLMEngine:
         # Metrics: close the old branch.
         self._metrics.record(
             CompactionApplied(
-                num_turns_dropped=turns_since_last,
                 dropped_chars=dropped_chars,
                 summary_chars=len(summary_text),
                 turns_since_last_compaction=turns_since_last,

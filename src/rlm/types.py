@@ -29,7 +29,6 @@ class IpythonExecuted:
 class CompactionApplied:
     """Emitted when the engine auto-compacts context after a summary turn."""
 
-    num_turns_dropped: int
     dropped_chars: int
     summary_chars: int
     turns_since_last_compaction: int
