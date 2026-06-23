@@ -29,7 +29,6 @@ class IpythonExecuted:
 class CompactionApplied:
     """Emitted when the engine auto-compacts context after a summary turn."""
 
-    num_turns_dropped: int
     dropped_chars: int
     summary_chars: int
     turns_since_last_compaction: int
@@ -177,7 +176,6 @@ class RLMMetrics:
     has_compacted: int = 0  # 1 if compactions_count > 0, else 0; aggregates as the per-batch fraction of rollouts that compacted
     turns_since_last_compaction: int = 0
     turns_between_compactions_mean: float = 0.0
-    compaction_turns_dropped_mean: float = 0.0
     compaction_chars_dropped_mean: float = 0.0
     compaction_summary_chars_mean: float = 0.0
 
@@ -191,7 +189,6 @@ class RLMMetrics:
     _ipython_input_chars_total: int = field(default=0, repr=False)
     _ipython_input_loc_total: int = field(default=0, repr=False)
     _turns_between_compactions_total: int = field(default=0, repr=False)
-    _compaction_turns_dropped_total: int = field(default=0, repr=False)
     _compaction_chars_dropped_total: int = field(default=0, repr=False)
     _compaction_summary_chars_total: int = field(default=0, repr=False)
 
@@ -403,7 +400,6 @@ class RLMMetrics:
         elif isinstance(event, CompactionApplied):
             self.compactions_count += 1
             self._turns_between_compactions_total += event.turns_since_last_compaction
-            self._compaction_turns_dropped_total += event.num_turns_dropped
             self._compaction_chars_dropped_total += event.dropped_chars
             self._compaction_summary_chars_total += event.summary_chars
             # End the old branch for token accounting, then reset the retained
@@ -428,9 +424,6 @@ class RLMMetrics:
         if self.compactions_count:
             self.turns_between_compactions_mean = (
                 self._turns_between_compactions_total / self.compactions_count
-            )
-            self.compaction_turns_dropped_mean = (
-                self._compaction_turns_dropped_total / self.compactions_count
             )
             self.compaction_chars_dropped_mean = (
                 self._compaction_chars_dropped_total / self.compactions_count

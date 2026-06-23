@@ -60,7 +60,6 @@ def test_total_tool_response_tokens_across_compactions():
     )  # +30
     m.record(
         CompactionApplied(
-            num_turns_dropped=2,
             dropped_chars=0,
             summary_chars=0,
             turns_since_last_compaction=2,
