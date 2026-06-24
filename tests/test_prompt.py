@@ -34,7 +34,7 @@ def _prompt(
 
 def test_git_history_guard_prompt_included_for_shell_tools(monkeypatch):
     monkeypatch.delenv("RLM_ALLOW_GIT", raising=False)
-    prompt = _prompt([_Tool("bash")])
+    prompt = _prompt([_Tool("ipython")])
 
     assert GIT_HISTORY_GUARD_PROMPT in prompt
     assert "Do not cheat" in prompt
@@ -46,7 +46,7 @@ def test_git_history_guard_prompt_included_for_shell_tools(monkeypatch):
 def test_git_history_guard_prompt_omitted_when_unrestricted(monkeypatch):
     monkeypatch.setenv("RLM_ALLOW_GIT", "1")
 
-    assert GIT_HISTORY_GUARD_PROMPT not in _prompt([_Tool("bash")])
+    assert GIT_HISTORY_GUARD_PROMPT not in _prompt([_Tool("ipython")])
 
 
 def test_git_history_guard_prompt_omitted_without_shell_tools(monkeypatch):
@@ -67,7 +67,7 @@ def test_ipython_control_prompt_included_for_ipython_tool():
 
 
 def test_ipython_control_prompt_omitted_without_ipython_tool():
-    assert IPYTHON_CONTROL_PROMPT not in _prompt([_Tool("bash")])
+    assert IPYTHON_CONTROL_PROMPT not in _prompt([])
 
 
 def test_edit_skill_prompt_included_only_when_edit_is_installed():
