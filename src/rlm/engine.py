@@ -13,7 +13,7 @@ from pathlib import Path
 from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
-from rlm.mcp import generate_mcp_skills, list_skill_modules, load_mcp_servers
+from rlm.mcp import generate_mcp_skills, load_mcp_servers
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -22,9 +22,9 @@ from rlm.tools import (
     IPythonREPL,
     ToolContext,
     ToolOutcome,
+    discover_skills,
     get_active_builtin_tools,
     get_builtin_tool,
-    get_installed_skills,
 )
 from rlm.types import CompactionApplied, RLMMetrics, RLMResult, TokenUsage
 
@@ -551,7 +551,7 @@ class RLMEngine:
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR) if SKILLS_DIR is not None else None,
-            get_installed_skills() + list_skill_modules(self.session.dir),
+            discover_skills(self.session.dir),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             active_tools=active_tools,
