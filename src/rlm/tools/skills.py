@@ -8,7 +8,7 @@ from pathlib import Path
 from rlm.mcp import list_skill_modules
 
 
-TASK_SKILLS_DIR = Path("/task/rlm-skills")
+TASK_SKILLS_DIR = Path("/task/skills")
 
 
 def _find_skills_dir() -> Path | None:
@@ -39,7 +39,7 @@ def discover_skills(session_dir: Path | None = None) -> list[str]:
     """All skill module names the kernel should pre-import — from two sources.
 
     Pip-installed ``rlm-skill-*`` distributions are found via distribution metadata, so they
-    resolve wherever they were installed from (``/task/rlm-skills``, the test venv, ...) and
+    resolve wherever they were installed from (``/task/skills``, the test venv, ...) and
     keep their shell CLIs. MCP tool skills are flat modules generated into ``session_dir``
     (see ``rlm.mcp``); these can't be discovered the same way, so the dir is walked directly.
     """

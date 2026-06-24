@@ -26,7 +26,7 @@ def _prompt(
         "/repo",
         None,
         installed_skills or [],
-        "/repo/.rlm/messages.jsonl",
+        "/repo/.agent/messages.jsonl",
         allow_recursion=False,
         active_tools=active_tools,
     )

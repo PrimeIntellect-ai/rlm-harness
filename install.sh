@@ -119,12 +119,12 @@ fi
 
 # Install rlm as an isolated CLI tool (separate venv, on PATH).
 # Skills are owned by the environment (e.g. ComposableEnv uploads them to
-# /task/rlm-skills before this script runs).  Discover and install any
+# /task/skills before this script runs).  Discover and install any
 # that are present so they're both importable and on PATH.
 SKILL_ARGS=""
 SKILL_TOOL_NAMES=""
-if [ -d /task/rlm-skills ]; then
-    for skill_dir in /task/rlm-skills/*/; do
+if [ -d /task/skills ]; then
+    for skill_dir in /task/skills/*/; do
         [ -f "$skill_dir/pyproject.toml" ] || continue
         skill_name=$(grep '^name' "$skill_dir/pyproject.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
         SKILL_ARGS="$SKILL_ARGS --with-editable $skill_dir --with-executables-from $skill_name"
