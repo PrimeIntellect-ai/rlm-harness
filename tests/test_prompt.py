@@ -79,3 +79,39 @@ def test_edit_skill_prompt_included_only_when_edit_is_installed():
     assert EDIT_SKILL_PROMPT not in _prompt(
         [_Tool("ipython")], installed_skills=["search_docs"]
     )
+
+
+def test_skill_pre_imported_language_present_with_ipython():
+    prompt = _prompt([_Tool("ipython")], installed_skills=["websearch"])
+
+    assert "Installed skills (pre-imported): `websearch`." in prompt
+    assert "async function" in prompt
+    assert "also available as a shell command" in prompt
+
+
+def test_skill_usage_language_requires_ipython():
+    """Without ipython there is no kernel, so skills are not pre-imported.
+
+    The async-function language must drop, but the shell-command surface is
+    still real in bash mode.
+    """
+    prompt = _prompt([_Tool("bash")], installed_skills=["websearch"])
+
+    assert "Installed skills: `websearch`." in prompt
+    assert "(pre-imported)" not in prompt
+    assert "async function" not in prompt
+    assert "also available as a shell command" in prompt
+
+
+def test_skill_shell_command_language_requires_shell_tool():
+    """With neither ipython nor bash, skills can't be invoked — list names only."""
+    prompt = _prompt([_Tool("edit")], installed_skills=["websearch"])
+
+    assert "Installed skills: `websearch`." in prompt
+    assert "(pre-imported)" not in prompt
+    assert "also available as a shell command" not in prompt
+
+
+def test_edit_skill_prompt_omitted_without_ipython():
+    """EDIT_SKILL_PROMPT is IPython-specific; drop it when no kernel runs."""
+    assert EDIT_SKILL_PROMPT not in _prompt([_Tool("bash")], installed_skills=["edit"])

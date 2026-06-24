@@ -101,6 +101,12 @@ def build_system_prompt(
         "Install additional packages with `uv pip install <pkg>` (this is a uv-managed venv with no pip module).",
     ]
 
+    # How skills can actually be reached depends on the active tool set:
+    # the pre-imported async-function surface needs the ipython kernel, while
+    # the shell-command surface needs any shell-capable tool (bash or ipython).
+    ipython_active = _has_tool(active_tools, "ipython")
+    shell_active = any(tool.name in SHELL_TOOL_NAMES for tool in active_tools)
+
     skill_lines: list[str] = []
     if skills_dir:
         skill_lines.append(
@@ -108,16 +114,20 @@ def build_system_prompt(
         )
     if installed_skills:
         installed = ", ".join(f"`{skill}`" for skill in installed_skills)
-        skill_lines.append(f"Installed skills (pre-imported): {installed}.")
-        skill_lines.append(
-            "Each skill is an async function by the same name. "
-            "Inspect with `help(<skill>)` or `inspect.signature(<skill>.run)`."
-        )
-        skill_lines.append(
-            "Each skill is also available as a shell command by the same name: `<skill> ...`. "
-            "Discover its CLI usage with `<skill> --help`."
-        )
-        if "edit" in installed_skills:
+        if ipython_active:
+            skill_lines.append(f"Installed skills (pre-imported): {installed}.")
+            skill_lines.append(
+                "Each skill is an async function by the same name. "
+                "Inspect with `help(<skill>)` or `inspect.signature(<skill>.run)`."
+            )
+        else:
+            skill_lines.append(f"Installed skills: {installed}.")
+        if shell_active:
+            skill_lines.append(
+                "Each skill is also available as a shell command by the same name: `<skill> ...`. "
+                "Discover its CLI usage with `<skill> --help`."
+            )
+        if "edit" in installed_skills and ipython_active:
             skill_lines.append(EDIT_SKILL_PROMPT)
     if skill_lines:
         parts.extend(["", *skill_lines])
@@ -131,7 +141,7 @@ def build_system_prompt(
             ]
         )
 
-    if _has_tool(active_tools, "ipython"):
+    if ipython_active:
         parts.extend(["", IPYTHON_CONTROL_PROMPT])
 
     if _should_include_git_history_guard(active_tools):
