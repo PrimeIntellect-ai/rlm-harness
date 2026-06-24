@@ -35,18 +35,14 @@ def _search_one(exa: Exa, query: str, num_results: int) -> str:
     return _format_results(response.results, query)
 
 
-async def run(
-    queries: list[str],
-    *,
-    num_results: int | None = None,
-) -> str:
+async def run(queries: list[str], *, num_results: int = 5) -> str:
     """Run web searches via Exa in parallel and return formatted results.
 
     Pass multiple queries to search different angles at once.
 
     Args:
         queries: Web search queries.
-        num_results: Results per query. Defaults to ``$RLM_SEARCH_NUM_RESULTS`` or 5.
+        num_results: Results per query.
 
     Returns:
         Formatted results (title, URL, highlights) concatenated across queries.
@@ -55,15 +51,6 @@ async def run(
     if not api_key:
         return "Error: EXA_API_KEY environment variable is not set"
 
-    if num_results is None:
-        num_results = int(os.environ.get("RLM_SEARCH_NUM_RESULTS", "5"))
-    max_concurrent = int(os.environ.get("RLM_SEARCH_MAX_CONCURRENT", "10"))
-    if max_concurrent < 1:
-        raise ValueError(
-            f"RLM_SEARCH_MAX_CONCURRENT must be >= 1, got {max_concurrent}"
-        )
-
-    queries = queries[:max_concurrent]
     exa = Exa(api_key=api_key)
 
     async def _run_query(query: str) -> str:
