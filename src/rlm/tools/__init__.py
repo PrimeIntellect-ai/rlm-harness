@@ -7,7 +7,12 @@ from rlm.tools.registry import (
     get_active_tools,
     get_builtin_tool,
 )
-from rlm.tools.skills import SKILLS_DIR, TASK_SKILLS_DIR, get_installed_skills
+from rlm.tools.skills import (
+    SKILLS_DIR,
+    TASK_SKILLS_DIR,
+    discover_skills,
+    get_installed_skills,
+)
 
 __all__ = [
     "BuiltinTool",
@@ -16,6 +21,7 @@ __all__ = [
     "TASK_SKILLS_DIR",
     "ToolContext",
     "ToolOutcome",
+    "discover_skills",
     "get_active_builtin_tools",
     "get_active_tools",
     "get_builtin_tool",

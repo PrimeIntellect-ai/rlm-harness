@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.git_block import find_blocked_in_ipython, refusal
-from rlm.tools.skills import get_installed_skills
+from rlm.tools.skills import discover_skills
 from rlm.types import IpythonExecuted
 
 if TYPE_CHECKING:
@@ -156,11 +156,15 @@ class IPythonREPL:
         depth = int(os.environ.get("RLM_DEPTH", "0"))
         max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         allow_recursion = depth < max_depth
-        installed_skills = get_installed_skills()
+        # Pip-installed skills + the MCP-tool modules generated into the session dir (rlm.mcp);
+        # the session dir goes on the kernel's sys.path so those import by name.
+        skill_names = discover_skills(self.session.dir if self.session else None)
 
         setup_code = f"""\
 import os, sys, types, json, time, functools, inspect
 os.chdir({self.cwd!r})
+if {bool(session_dir)!r}:
+    sys.path.append({session_dir!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 
@@ -215,7 +219,7 @@ def _wrap_callable(mod, log_source):
     return wrapped
 
 
-for _name in {installed_skills!r}:
+for _name in {skill_names!r}:
     globals()[_name] = _wrap_callable(__import__(_name), 'python')
 
 if {allow_recursion!r}:
