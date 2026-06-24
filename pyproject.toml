@@ -25,7 +25,6 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "pydantic",
-    # Backend for the built-in `search` skill (rlm.skills.search), enabled via RLM_SKILLS.
     "exa_py",
 ]
 
