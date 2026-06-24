@@ -11,7 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 
 # Built-in skill name -> module its ``run`` is re-exported from.
-_BUILTIN_SKILLS: dict[str, str] = {"edit": "rlm.skills.edit"}
+_BUILTIN_SKILLS: dict[str, str] = {
+    "edit": "rlm.skills.edit",
+    "search": "rlm.skills.search",
+}
 
 
 def available_builtin_skills() -> list[str]:
