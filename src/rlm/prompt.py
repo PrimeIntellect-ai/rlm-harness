@@ -74,9 +74,9 @@ EDIT_SKILL_PROMPT = (
 )
 SEARCH_SKILL_PROMPT = (
     "For web search, use the pre-imported async `search` skill from IPython: "
-    '`await search(queries=["...", "..."])`. Pass several queries to cover '
-    "different angles in one parallel call; results come back as title, URL, "
-    "and highlight snippets. Assign the result to a variable so you can revisit it."
+    '`await search(query="...")`. Results come back as title, URL, and highlight '
+    "snippets; assign the result to a variable so you can revisit it. To cover "
+    "several angles at once, fan out with `asyncio.gather(search(...), search(...))`."
 )
 
 

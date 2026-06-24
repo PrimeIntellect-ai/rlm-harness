@@ -6,7 +6,7 @@ A minimal CLI coding agent with a persistent IPython execution environment and o
 
 The model gets a single built-in tool, `ipython`: a persistent IPython kernel for Python, shell commands via `!command`, and multi-line shell scripts via `%%bash`. The tool set is not configurable. File edits, shell work, and orchestration all go through it.
 
-For convenience, rlm ships built-in *skills* that can be enabled per run via `RLM_SKILLS` (comma-separated, off by default): `edit` (single-occurrence string replacement) and `search` (web search via Exa, needs `EXA_API_KEY`). Enabled skills are pre-imported into the IPython kernel like any other skill (see [Skills](#skills)), so the agent calls `await edit(path=..., old_str=..., new_str=...)` or `await search(queries=[...])`.
+For convenience, rlm ships built-in *skills* that can be enabled per run via `RLM_SKILLS` (comma-separated, off by default): `edit` (single-occurrence string replacement) and `search` (web search via Exa, needs `EXA_API_KEY`). Enabled skills are pre-imported into the IPython kernel like any other skill (see [Skills](#skills)), so the agent calls `await edit(path=..., old_str=..., new_str=...)` or `await search(query=...)`.
 
 Context is reclaimed automatically: when a turn's prompt token count crosses `RLM_SUMMARIZE_AT_TOKENS`, the engine compacts the conversation into a summary and continues on a fresh branch. The IPython kernel keeps running across the compaction, so REPL state survives (see [Compaction](#compaction)).
 
@@ -119,7 +119,7 @@ These artifacts are consumable for debugging, visualization, or training-data ex
 
 ## Skills
 
-`rlm` ships a small set of built-in skills enabled per run via `RLM_SKILLS` (`edit`, `search`; see [MCP tools as skills](#mcp-tools-as-skills) for the related MCP path). `search` does web search through Exa and needs `EXA_API_KEY`; it returns title/URL/highlight snippets and accepts multiple queries to run in parallel (`await search(queries=["a", "b"])`). Additional skills are supplied by the host environment: before `install.sh` runs, the environment places skill packages under `/task/rlm-skills/<name>/`, and `install.sh` installs them alongside `rlm` so they're both importable and on `$PATH`.
+`rlm` ships a small set of built-in skills enabled per run via `RLM_SKILLS` (`edit`, `search`; see [MCP tools as skills](#mcp-tools-as-skills) for the related MCP path). `search` does web search through Exa and needs `EXA_API_KEY`; it returns title/URL/highlight snippets for a single query (`await search(query="...")`). Additional skills are supplied by the host environment: before `install.sh` runs, the environment places skill packages under `/task/rlm-skills/<name>/`, and `install.sh` installs them alongside `rlm` so they're both importable and on `$PATH`.
 
 From IPython, import a skill and call its async `run(...)` entrypoint:
 

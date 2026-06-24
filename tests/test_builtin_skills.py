@@ -52,7 +52,7 @@ def test_search_enable_writes_stub(tmp_path):
 
 async def test_search_missing_api_key_returns_error(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    result = await search(queries=["anything"])
+    result = await search(query="anything")
     assert "EXA_API_KEY" in result
 
 

@@ -1,7 +1,7 @@
 """Built-in ``search`` skill — web search via Exa.
 
 Enabled via ``RLM_SKILLS``; pre-imported into the IPython kernel so the agent calls
-``await search(queries=["..."])``. Needs ``EXA_API_KEY``. Ported from the Exa ``websearch``
+``await search(query="...")``. Needs ``EXA_API_KEY``. Ported from the Exa ``websearch``
 skill in research-environments/rlm_browsecomp.
 """
 
@@ -30,35 +30,24 @@ def _format_results(results, query: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
-def _search_one(exa: Exa, query: str, num_results: int) -> str:
-    response = exa.search_and_contents(query, num_results=num_results, highlights=True)
-    return _format_results(response.results, query)
-
-
-async def run(queries: list[str], *, num_results: int = 5) -> str:
-    """Run web searches via Exa in parallel and return formatted results.
-
-    Pass multiple queries to search different angles at once.
+async def run(query: str, *, num_results: int = 5) -> str:
+    """Run a web search via Exa and return formatted results.
 
     Args:
-        queries: Web search queries.
-        num_results: Results per query.
+        query: Web search query.
+        num_results: Number of results to return.
 
     Returns:
-        Formatted results (title, URL, highlights) concatenated across queries.
+        Formatted results (title, URL, highlights).
     """
     api_key = os.environ.get("EXA_API_KEY", "")
     if not api_key:
         return "Error: EXA_API_KEY environment variable is not set"
 
-    exa = Exa(api_key=api_key)
+    def _search() -> str:
+        response = Exa(api_key=api_key).search_and_contents(
+            query, num_results=num_results, highlights=True
+        )
+        return _format_results(response.results, query)
 
-    async def _run_query(query: str) -> str:
-        try:
-            result = await asyncio.to_thread(_search_one, exa, query, num_results)
-        except Exception as e:
-            result = f"Error searching for '{query}': {e}"
-        return f'Results for query "{query}":\n\n{result}'
-
-    parts = await asyncio.gather(*[_run_query(query) for query in queries])
-    return "\n\n---\n\n".join(parts)
+    return await asyncio.to_thread(_search)
