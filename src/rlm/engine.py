@@ -16,6 +16,7 @@ from rlm.client import call_with_retries, extract_usage, make_client
 from rlm.mcp import generate_mcp_skills, load_mcp_servers
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
+from rlm.skills import enable_builtin_skills
 from rlm.tools import (
     SKILLS_DIR,
     BuiltinTool,
@@ -182,6 +183,14 @@ class RLMEngine:
             mcp_servers if mcp_servers is not None else load_mcp_servers()
         )
 
+        # Built-in skills (rlm.skills) to enable for this run, from RLM_SKILLS (comma-separated).
+        raw_skills = os.environ.get("RLM_SKILLS")
+        self.skills = (
+            [s.strip() for s in raw_skills.split(",") if s.strip()]
+            if raw_skills
+            else []
+        )
+
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
         self.max_tokens = _max_tok if _max_tok > 0 else None
@@ -233,31 +242,20 @@ class RLMEngine:
             cwd=self.cwd,
         )
 
-        # Start IPython kernel only when the ipython tool is active —
-        # otherwise the model can't see or dispatch it, so the kernel
-        # startup (subprocess + injection) is pure waste.
-        ipython_active = any(
-            tool.name == "ipython" for tool in get_active_builtin_tools()
-        )
-
-        # Expose any wired MCP tool servers as pre-imported IPython skills (PTC), written into
-        # the session dir; the REPL and prompt read them back from there. The agent calls them
-        # from the REPL, so they need ipython; warn if it's disabled.
-        if self.mcp_servers and ipython_active:
-            skills = await generate_mcp_skills(self.mcp_servers, self.session.dir)
+        # Skills the kernel pre-imports, all written into the session dir (the REPL and prompt
+        # read them back from there): enabled built-in skills (rlm.skills) + any wired MCP tools
+        # (PTC). ipython is the sole builtin tool, so the kernel always starts.
+        enable_builtin_skills(self.skills, self.session.dir)
+        if self.mcp_servers:
+            mcp_skills = await generate_mcp_skills(self.mcp_servers, self.session.dir)
             logger.info(
                 "rlm: exposed %d MCP tool(s) as skills - %s",
-                len(skills),
-                ", ".join(skills),
-            )
-        elif self.mcp_servers:
-            logger.warning(
-                "MCP tool servers are configured but the ipython tool is inactive - MCP tools are unavailable"
+                len(mcp_skills),
+                ", ".join(mcp_skills),
             )
 
-        if ipython_active:
-            self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
-            self._repl.start()
+        self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
+        self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
         try:
