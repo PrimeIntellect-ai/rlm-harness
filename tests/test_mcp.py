@@ -1,8 +1,8 @@
 """Tests for MCP-tools-as-skills (``rlm.mcp``).
 
-Covers the pure logic: config parsing, JSON-schema → signature/docstring rendering, and
-generation of importable skill modules. The live MCP round-trip (kernel pre-import +
-streamable-HTTP call) is exercised end-to-end by the general-agent-v1 eval, not here.
+Covers the pure logic: config parsing, JSON-schema → signature rendering, and generation
+of importable skill modules. The live MCP round-trip (kernel pre-import + streamable-HTTP
+call) is exercised end-to-end by the general-agent-v1 eval, not here.
 """
 
 from __future__ import annotations
@@ -11,12 +11,14 @@ import importlib
 import inspect
 import sys
 
+from mcp.types import Tool
+
 from rlm import mcp
 
 SCHEMA = {
     "type": "object",
     "properties": {
-        "day": {"type": "string", "description": "the day"},
+        "day": {"type": "string"},
         "count": {"type": "integer"},
         "weird-name": {"type": "string"},
     },
@@ -35,15 +37,14 @@ def test_load_mcp_servers(monkeypatch):
     assert mcp.load_mcp_servers() == {"tools": "http://h/mcp", "web": "http://h/web"}
 
 
-def test_sanitize():
-    assert mcp._sanitize("tools_add_event") == "tools_add_event"
-    assert mcp._sanitize("web-search.run") == "web_search_run"
-    assert mcp._sanitize("2fa") == "_2fa"
+def test_skill_name():
+    assert mcp._skill_name("tools", "add_event") == "tools_add_event"
+    assert mcp._skill_name("web", "search.run") == "web_search_run"
+    assert mcp._skill_name("", "2fa") == "_2fa"
 
 
 def test_build_signature():
-    sig = mcp.build_signature(SCHEMA)
-    params = sig.parameters
+    params = mcp.build_signature(SCHEMA).parameters
     # non-identifier property is skipped; required comes before optional.
     assert list(params) == ["day", "count"]
     assert all(p.kind is inspect.Parameter.KEYWORD_ONLY for p in params.values())
@@ -53,36 +54,21 @@ def test_build_signature():
     assert params["count"].annotation is int
 
 
-def test_render_doc():
-    doc = mcp.render_doc("Add an event.", SCHEMA)
-    assert doc.splitlines()[0] == "Add an event."
-    assert "day (string): the day" in doc
-    assert "count (integer, optional)" in doc
-
-
 def test_write_skill_modules(tmp_path):
-    tool = mcp.McpTool(
-        skill="tools_add_event",
-        tool="add_event",
-        url="http://h/mcp",
-        description="Add an event.\ndetails",
-        input_schema=SCHEMA,
+    tool = Tool(
+        name="add_event", description="Add an event.\ndetails", inputSchema=SCHEMA
     )
-    skills = mcp.write_skill_modules([tool], tmp_path)
-    assert skills == [
-        mcp.McpSkill(
-            name="tools_add_event",
-            signature="(*, day: str, count: int = None)",
-            summary="Add an event.",
-        )
-    ]
+    names = mcp.write_skill_modules(
+        {"tools_add_event": ("http://h/mcp", tool)}, tmp_path
+    )
+    assert names == ["tools_add_event"]
 
     sys.path.insert(0, str(tmp_path))
     try:
         module = importlib.import_module("tools_add_event")
         assert inspect.iscoroutinefunction(module.run)
         assert str(inspect.signature(module.run)) == "(*, day: str, count: int = None)"
-        assert module.run.__doc__.splitlines()[0] == "Add an event."
+        assert module.run.__doc__ == "Add an event.\ndetails"
     finally:
         sys.path.remove(str(tmp_path))
         sys.modules.pop("tools_add_event", None)

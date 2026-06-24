@@ -187,14 +187,14 @@ A host harness can wire task-specific [MCP](https://modelcontextprotocol.io) too
 {"mcpServers": {"tools": {"url": "http://127.0.0.1:8000/mcp"}}}
 ```
 
-At startup `rlm` connects to each server, lists its tools, and generates one skill per tool (named `<server>_<tool>`, e.g. `tools_add_event`). These behave exactly like installed skills — pre-imported into the IPython namespace as async functions the agent calls programmatically:
+At startup `rlm` connects to each server, lists its tools, and generates one skill per tool (named `<server>_<tool>`, e.g. `tools_add_event`). These join the installed skills — pre-imported into the IPython namespace as async functions the agent calls programmatically, with a signature built from the tool's input schema:
 
 ```python
-help(tools_add_event)  # signature + argument docs, built from the tool's input schema
+help(tools_add_event)  # signature (typed from the schema) + the tool's description
 await tools_add_event(day="monday", title="standup")
 ```
 
-Each call connects to the server over streamable HTTP, invokes the tool, and returns its text content (a tool-reported error is raised as `RuntimeError`). The generated skills require the `ipython` tool; if it's disabled, `RLM_MCP_CONFIG` is ignored with a warning. Unlike installed skills, MCP skills are IPython-only — they're not exposed as shell commands.
+Each call connects to the server over streamable HTTP, invokes the tool, and returns its text content (a tool-reported error is raised as `RuntimeError`). The generated modules are written into the session directory and the kernel imports them from there. The skills require the `ipython` tool; if it's disabled, `RLM_MCP_CONFIG` is ignored with a warning. Unlike installed skills, MCP skills are IPython-only — they're not exposed as shell commands.
 
 ## Kernel
 

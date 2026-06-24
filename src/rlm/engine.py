@@ -13,7 +13,7 @@ from pathlib import Path
 from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
-from rlm.mcp import McpSkill, generate_mcp_skills, load_mcp_servers
+from rlm.mcp import generate_mcp_skills, load_mcp_servers
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -194,8 +194,8 @@ class RLMEngine:
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
 
-        # MCP tools exposed as pre-imported IPython skills (populated in run()).
-        self._mcp_skills: list[McpSkill] = []
+        # MCP tools exposed as pre-imported IPython skills — module names (populated in run()).
+        self._mcp_skills: list[str] = []
 
         # Turn index (0-based) at the start of the current branch. Used to
         # report "turns since last compaction" when a compaction fires.
@@ -239,13 +239,12 @@ class RLMEngine:
         # Expose any wired MCP tool servers as pre-imported IPython skills (PTC). The
         # agent calls them from the REPL, so they need ipython; warn if it's disabled.
         mcp_servers = load_mcp_servers()
-        mcp_skills_dir = self.session.dir / "mcp_skills"
         if mcp_servers and ipython_active:
-            self._mcp_skills = await generate_mcp_skills(mcp_servers, mcp_skills_dir)
+            self._mcp_skills = await generate_mcp_skills(mcp_servers, self.session.dir)
             logger.info(
                 "rlm: exposed %d MCP tool(s) as skills - %s",
                 len(self._mcp_skills),
-                ", ".join(skill.name for skill in self._mcp_skills),
+                ", ".join(self._mcp_skills),
             )
         elif mcp_servers:
             logger.warning(
@@ -254,10 +253,7 @@ class RLMEngine:
 
         if ipython_active:
             self._repl = IPythonREPL(
-                cwd=self.cwd,
-                session=self.session,
-                mcp_skills=[skill.name for skill in self._mcp_skills],
-                mcp_skills_dir=str(mcp_skills_dir) if self._mcp_skills else None,
+                cwd=self.cwd, session=self.session, mcp_skills=self._mcp_skills
             )
             self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
@@ -553,11 +549,10 @@ class RLMEngine:
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR) if SKILLS_DIR is not None else None,
-            get_installed_skills(),
+            get_installed_skills() + self._mcp_skills,
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             active_tools=active_tools,
-            mcp_skills=self._mcp_skills,
         )
         if self.append_to_system_prompt:
             system_prompt += "\n\n" + self.append_to_system_prompt
