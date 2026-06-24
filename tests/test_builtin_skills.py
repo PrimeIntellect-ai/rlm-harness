@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from rlm.skills import available_builtin_skills, enable_builtin_skills
@@ -51,15 +49,15 @@ def test_search_enable_writes_stub(tmp_path):
 
 
 async def test_search_missing_api_key_returns_error(monkeypatch):
-    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
     result = await run_search(query="anything")
-    assert "EXA_API_KEY" in result
+    assert "SERPER_API_KEY" in result
 
 
 def test_search_format_results():
     results = [
-        SimpleNamespace(title="First", url="https://a", highlights=["  snippet  one "]),
-        SimpleNamespace(title="", url="", highlights=[]),
+        {"title": "First", "link": "https://a", "snippet": "snippet one"},
+        {"title": "", "link": "", "snippet": ""},
     ]
     out = format_results(results, "q")
     assert "Result 1: First" in out
