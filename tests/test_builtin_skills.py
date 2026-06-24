@@ -8,8 +8,8 @@ import pytest
 
 from rlm.skills import available_builtin_skills, enable_builtin_skills
 from rlm.skills.edit import run as edit
-from rlm.skills.search import _format_results
-from rlm.skills.search import run as search
+from rlm.skills.search import format_results
+from rlm.skills.search import run as run_search
 
 
 async def test_edit_replaces_unique_string(tmp_path):
@@ -52,7 +52,7 @@ def test_search_enable_writes_stub(tmp_path):
 
 async def test_search_missing_api_key_returns_error(monkeypatch):
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    result = await search(query="anything")
+    result = await run_search(query="anything")
     assert "EXA_API_KEY" in result
 
 
@@ -61,7 +61,7 @@ def test_search_format_results():
         SimpleNamespace(title="First", url="https://a", highlights=["  snippet  one "]),
         SimpleNamespace(title="", url="", highlights=[]),
     ]
-    out = _format_results(results, "q")
+    out = format_results(results, "q")
     assert "Result 1: First" in out
     assert "URL: https://a" in out
     assert "- snippet one" in out
@@ -69,4 +69,4 @@ def test_search_format_results():
 
 
 def test_search_format_results_empty():
-    assert _format_results([], "q") == "No results returned for query: q"
+    assert format_results([], "q") == "No results returned for query: q"

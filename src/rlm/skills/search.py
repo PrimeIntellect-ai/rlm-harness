@@ -13,7 +13,7 @@ import os
 from exa_py import Exa
 
 
-def _format_results(results, query: str) -> str:
+def format_results(results, query: str) -> str:
     sections: list[str] = []
     for i, result in enumerate(results, 1):
         lines = [f"Result {i}: {getattr(result, 'title', '') or 'Untitled'}"]
@@ -30,6 +30,17 @@ def _format_results(results, query: str) -> str:
     return "\n\n---\n\n".join(sections)
 
 
+def search(query: str, num_results: int = 5) -> str:
+    """Run a synchronous Exa web search and return formatted results."""
+    api_key = os.environ.get("EXA_API_KEY", "")
+    if not api_key:
+        return "Error: EXA_API_KEY environment variable is not set"
+    response = Exa(api_key=api_key).search_and_contents(
+        query, num_results=num_results, highlights=True
+    )
+    return format_results(response.results, query)
+
+
 async def run(query: str, *, num_results: int = 5) -> str:
     """Run a web search via Exa and return formatted results.
 
@@ -40,14 +51,4 @@ async def run(query: str, *, num_results: int = 5) -> str:
     Returns:
         Formatted results (title, URL, highlights).
     """
-    api_key = os.environ.get("EXA_API_KEY", "")
-    if not api_key:
-        return "Error: EXA_API_KEY environment variable is not set"
-
-    def _search() -> str:
-        response = Exa(api_key=api_key).search_and_contents(
-            query, num_results=num_results, highlights=True
-        )
-        return _format_results(response.results, query)
-
-    return await asyncio.to_thread(_search)
+    return await asyncio.to_thread(search, query, num_results)
