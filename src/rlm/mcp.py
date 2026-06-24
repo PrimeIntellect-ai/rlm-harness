@@ -18,14 +18,11 @@ from __future__ import annotations
 
 import inspect
 import json
-import logging
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 MCP_CONFIG_ENV = "RLM_MCP_CONFIG"
 
