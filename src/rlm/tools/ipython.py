@@ -125,9 +125,19 @@ class IpythonTool:
 class IPythonREPL:
     """Persistent IPython kernel communicating via Jupyter protocol."""
 
-    def __init__(self, cwd: str, session: "Session | None" = None):
+    def __init__(
+        self,
+        cwd: str,
+        session: "Session | None" = None,
+        mcp_skills: list[str] | None = None,
+        mcp_skills_dir: str | None = None,
+    ):
         self.cwd = cwd
         self.session = session
+        # MCP tools exposed as pre-imported skills (their module names) + the dir the
+        # generated modules live in (put on the kernel's sys.path). See rlm.mcp.
+        self.mcp_skills = mcp_skills or []
+        self.mcp_skills_dir = mcp_skills_dir
         self._km = None
         self._kc = None
         self._lock = threading.Lock()
@@ -156,11 +166,15 @@ class IPythonREPL:
         depth = int(os.environ.get("RLM_DEPTH", "0"))
         max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         allow_recursion = depth < max_depth
-        installed_skills = get_installed_skills()
+        # MCP tools (rlm.mcp) are pre-imported alongside pip-installed skills; their
+        # generated modules live in mcp_skills_dir, added to the kernel's sys.path.
+        installed_skills = get_installed_skills() + list(self.mcp_skills)
 
         setup_code = f"""\
 import os, sys, types, json, time, functools, inspect
 os.chdir({self.cwd!r})
+if {self.mcp_skills_dir!r}:
+    sys.path.append({self.mcp_skills_dir!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)
 

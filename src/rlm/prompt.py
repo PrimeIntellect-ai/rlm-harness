@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from rlm.tools.git_block import allow_git
 
 if TYPE_CHECKING:
+    from rlm.mcp import McpSkill
     from rlm.tools.base import BuiltinTool
 
 
@@ -82,6 +83,7 @@ def build_system_prompt(
     *,
     allow_recursion: bool,
     active_tools: list[BuiltinTool],
+    mcp_skills: list[McpSkill] | None = None,
 ) -> str:
     """Build the system prompt.
 
@@ -121,6 +123,17 @@ def build_system_prompt(
             skill_lines.append(EDIT_SKILL_PROMPT)
     if skill_lines:
         parts.extend(["", *skill_lines])
+
+    if mcp_skills:
+        parts.append("")
+        parts.append(
+            "Task tools (pre-imported async functions — call them straight from IPython, "
+            "e.g. `await tools_name(arg=value)`):"
+        )
+        for skill in mcp_skills:
+            summary = f" — {skill.summary}" if skill.summary else ""
+            parts.append(f"- `{skill.name}{skill.signature}`{summary}")
+        parts.append("Inspect any of them with `help(<name>)` for full argument docs.")
 
     if allow_recursion:
         parts.extend(

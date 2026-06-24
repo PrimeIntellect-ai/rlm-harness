@@ -61,6 +61,7 @@ All configuration is via environment variables:
 | `PRIME_API_KEY` | — | PI Inference pair: targets `https://api.pinference.ai/api/v1` and forwards `PRIME_TEAM_ID` as `X-Prime-Team-ID` when set. |
 | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | resolved by SDK | OpenAI pair — when `OPENAI_API_KEY` is set, AsyncOpenAI's native env handling is used (covers OpenAI direct and verifiers' rollout tunnel both). Provider precedence: explicit → PI → OpenAI. Keys are scoped to their own base URL so an `OPENAI_API_KEY` lying around can't leak to PI Inference. |
 | `RLM_TOOLS` | `ipython` | Comma-separated subset of builtin tools (`ipython`, `bash`, `edit`) to enable. Empty string = no tools. Unknown names raise. |
+| `RLM_MCP_CONFIG` | — | Standard `mcpServers` URL map; each server's tools become pre-imported IPython skills (`<server>_<tool>`). See [MCP tools as skills](#mcp-tools-as-skills). Requires the `ipython` tool. |
 | `RLM_MAX_DEPTH` | `0` | Max recursion depth (`0` means no sub-agents) |
 | `RLM_EXEC_TIMEOUT` | `300` | Seconds per IPython execution |
 | `RLM_MAX_OUTPUT` | `-1` | Max chars returned from a tool call (`-1` disables truncation; `0` is invalid) |
@@ -177,6 +178,23 @@ Dependencies go in the skill's own `pyproject.toml`; declare `rlm` there so the 
 ### Local development
 
 For running `rlm` against a specific skill set outside of a sandbox-orchestrated environment, create a `/task/rlm-skills/` directory (or bind-mount one) and place skill packages there before running `install.sh`. The rlm repo ships no skills by default; look at the `rlm-swe` or `rlm-deepdive` environments for working skill packages to copy.
+
+### MCP tools as skills
+
+A host harness can wire task-specific [MCP](https://modelcontextprotocol.io) tool servers to `rlm` by setting `RLM_MCP_CONFIG` to a standard `mcpServers` URL map:
+
+```json
+{"mcpServers": {"tools": {"url": "http://127.0.0.1:8000/mcp"}}}
+```
+
+At startup `rlm` connects to each server, lists its tools, and generates one skill per tool (named `<server>_<tool>`, e.g. `tools_add_event`). These behave exactly like installed skills — pre-imported into the IPython namespace as async functions the agent calls programmatically:
+
+```python
+help(tools_add_event)  # signature + argument docs, built from the tool's input schema
+await tools_add_event(day="monday", title="standup")
+```
+
+Each call connects to the server over streamable HTTP, invokes the tool, and returns its text content (a tool-reported error is raised as `RuntimeError`). The generated skills require the `ipython` tool; if it's disabled, `RLM_MCP_CONFIG` is ignored with a warning. Unlike installed skills, MCP skills are IPython-only — they're not exposed as shell commands.
 
 ## Kernel
 
