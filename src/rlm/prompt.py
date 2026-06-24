@@ -72,6 +72,12 @@ EDIT_SKILL_PROMPT = (
     "old/new strings; if the text contains triple double quotes, use triple "
     "single-quoted variables or build `old`/`new` from inspected file slices."
 )
+SEARCH_SKILL_PROMPT = (
+    "For web search, use the pre-imported async `search` skill from IPython: "
+    '`await search(queries=["...", "..."])`. Pass several queries to cover '
+    "different angles in one parallel call; results come back as title, URL, "
+    "and highlight snippets. Assign the result to a variable so you can revisit it."
+)
 
 
 def build_system_prompt(
@@ -119,6 +125,8 @@ def build_system_prompt(
         )
         if "edit" in installed_skills:
             skill_lines.append(EDIT_SKILL_PROMPT)
+        if "search" in installed_skills:
+            skill_lines.append(SEARCH_SKILL_PROMPT)
     if skill_lines:
         parts.extend(["", *skill_lines])
 

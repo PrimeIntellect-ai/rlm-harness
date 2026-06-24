@@ -1,11 +1,15 @@
-"""Tests for built-in skills (``rlm.skills``): the ``edit`` skill + the enable mechanism."""
+"""Tests for built-in skills (``rlm.skills``): the ``edit``/``search`` skills + enable mechanism."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
 from rlm.skills import available_builtin_skills, enable_builtin_skills
 from rlm.skills.edit import run as edit
+from rlm.skills.search import _format_results
+from rlm.skills.search import run as search
 
 
 async def test_edit_replaces_unique_string(tmp_path):
@@ -38,3 +42,31 @@ def test_enable_builtin_skills_writes_stub(tmp_path):
 def test_enable_unknown_skill_raises(tmp_path):
     with pytest.raises(ValueError, match="unknown skill"):
         enable_builtin_skills(["nope"], tmp_path)
+
+
+def test_search_enable_writes_stub(tmp_path):
+    assert "search" in available_builtin_skills()
+    assert enable_builtin_skills(["search"], tmp_path) == ["search"]
+    assert (tmp_path / "search.py").read_text() == "from rlm.skills.search import run\n"
+
+
+async def test_search_missing_api_key_returns_error(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    result = await search(queries=["anything"])
+    assert "EXA_API_KEY" in result
+
+
+def test_search_format_results():
+    results = [
+        SimpleNamespace(title="First", url="https://a", highlights=["  snippet  one "]),
+        SimpleNamespace(title="", url="", highlights=[]),
+    ]
+    out = _format_results(results, "q")
+    assert "Result 1: First" in out
+    assert "URL: https://a" in out
+    assert "- snippet one" in out
+    assert "Result 2: Untitled" in out
+
+
+def test_search_format_results_empty():
+    assert _format_results([], "q") == "No results returned for query: q"

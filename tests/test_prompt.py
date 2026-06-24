@@ -8,6 +8,7 @@ from rlm.prompt import (
     EDIT_SKILL_PROMPT,
     GIT_HISTORY_GUARD_PROMPT,
     IPYTHON_CONTROL_PROMPT,
+    SEARCH_SKILL_PROMPT,
     build_system_prompt,
 )
 
@@ -77,5 +78,15 @@ def test_edit_skill_prompt_included_only_when_edit_is_installed():
     assert 'await edit(path="pkg/file.py", old_str=old, new_str=new)' in prompt
     assert "triple double quotes" in prompt
     assert EDIT_SKILL_PROMPT not in _prompt(
+        [_Tool("ipython")], installed_skills=["search_docs"]
+    )
+
+
+def test_search_skill_prompt_included_only_when_search_is_installed():
+    prompt = _prompt([_Tool("ipython")], installed_skills=["search"])
+
+    assert SEARCH_SKILL_PROMPT in prompt
+    assert "await search(queries=" in prompt
+    assert SEARCH_SKILL_PROMPT not in _prompt(
         [_Tool("ipython")], installed_skills=["search_docs"]
     )
