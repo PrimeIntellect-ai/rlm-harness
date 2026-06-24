@@ -11,6 +11,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from rlm.mcp import list_skill_modules
 from rlm.tools.base import ToolContext, ToolOutcome
 from rlm.tools.git_block import find_blocked_in_ipython, refusal
 from rlm.tools.skills import get_installed_skills
@@ -125,17 +126,9 @@ class IpythonTool:
 class IPythonREPL:
     """Persistent IPython kernel communicating via Jupyter protocol."""
 
-    def __init__(
-        self,
-        cwd: str,
-        session: "Session | None" = None,
-        mcp_skills: list[str] | None = None,
-    ):
+    def __init__(self, cwd: str, session: "Session | None" = None):
         self.cwd = cwd
         self.session = session
-        # MCP tools exposed as pre-imported skills (module names); their generated modules
-        # live in the session dir, which is put on the kernel's sys.path. See rlm.mcp.
-        self.mcp_skills = mcp_skills or []
         self._km = None
         self._kc = None
         self._lock = threading.Lock()
@@ -164,14 +157,15 @@ class IPythonREPL:
         depth = int(os.environ.get("RLM_DEPTH", "0"))
         max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         allow_recursion = depth < max_depth
-        # MCP tools (rlm.mcp) are pre-imported alongside pip-installed skills; their
-        # generated modules live in the session dir, added to the kernel's sys.path.
-        installed_skills = get_installed_skills() + list(self.mcp_skills)
+        # MCP tools (rlm.mcp) are pre-imported alongside pip-installed skills; their generated
+        # modules live in the session dir, read back from there and added to the kernel's sys.path.
+        mcp_skills = list_skill_modules(self.session.dir) if self.session else []
+        installed_skills = get_installed_skills() + mcp_skills
 
         setup_code = f"""\
 import os, sys, types, json, time, functools, inspect
 os.chdir({self.cwd!r})
-if {bool(self.mcp_skills)!r}:
+if {bool(mcp_skills)!r}:
     sys.path.append({session_dir!r})
 os.environ['RLM_SESSION_DIR'] = {session_dir!r} or ''
 os.environ['RLM_DEPTH'] = str({depth!r} + 1)

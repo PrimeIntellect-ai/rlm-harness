@@ -62,6 +62,8 @@ def test_write_skill_modules(tmp_path):
         {"tools_add_event": ("http://h/mcp", tool)}, tmp_path
     )
     assert names == ["tools_add_event"]
+    # the directory is the source of truth — the modules are readable back from it.
+    assert mcp.list_skill_modules(tmp_path) == ["tools_add_event"]
 
     sys.path.insert(0, str(tmp_path))
     try:

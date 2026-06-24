@@ -187,6 +187,8 @@ A host harness can wire task-specific [MCP](https://modelcontextprotocol.io) too
 {"mcpServers": {"tools": {"url": "http://127.0.0.1:8000/mcp"}}}
 ```
 
+Programmatically, pass `mcp_servers={"tools": "http://127.0.0.1:8000/mcp"}` to `RLMEngine` / `rlm.run` instead (it takes precedence over `RLM_MCP_CONFIG`).
+
 At startup `rlm` connects to each server, lists its tools, and generates one skill per tool (named `<server>_<tool>`, e.g. `tools_add_event`). These join the installed skills — pre-imported into the IPython namespace as async functions the agent calls programmatically, with a signature built from the tool's input schema:
 
 ```python

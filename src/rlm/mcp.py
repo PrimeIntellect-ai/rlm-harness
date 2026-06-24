@@ -153,3 +153,12 @@ def write_skill_modules(
 async def generate_mcp_skills(servers: dict[str, str], dest_dir: Path) -> list[str]:
     """Discover all tools on ``servers`` and write them as skill modules in ``dest_dir``."""
     return write_skill_modules(await discover_tools(servers), dest_dir)
+
+
+def list_skill_modules(skills_dir: Path) -> list[str]:
+    """Names of the MCP-skill modules in ``skills_dir`` (its top-level ``.py`` files).
+
+    The directory the kernel imports from is the source of truth, so callers read it back
+    instead of threading the generated names around.
+    """
+    return sorted(path.stem for path in skills_dir.glob("*.py"))

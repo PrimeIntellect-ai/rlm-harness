@@ -13,7 +13,7 @@ from pathlib import Path
 from openai import AsyncOpenAI, BadRequestError
 
 from rlm.client import call_with_retries, extract_usage, make_client
-from rlm.mcp import generate_mcp_skills, load_mcp_servers
+from rlm.mcp import generate_mcp_skills, list_skill_modules, load_mcp_servers
 from rlm.prompt import build_system_prompt
 from rlm.session import Session
 from rlm.tools import (
@@ -148,6 +148,7 @@ class RLMEngine:
         cwd: str | None = None,
         session: Session | None = None,
         client: AsyncOpenAI | None = None,
+        mcp_servers: dict[str, str] | None = None,
     ):
         self.model = model or os.environ.get("RLM_MODEL", "openai/gpt-5-mini")
         self.cwd = cwd or os.getcwd()
@@ -175,6 +176,12 @@ class RLMEngine:
         self.max_depth = int(os.environ.get("RLM_MAX_DEPTH", "0"))
         self.depth = int(os.environ.get("RLM_DEPTH", "0"))
 
+        # Task MCP tool servers ({name: url}) to expose as IPython skills; kwarg wins,
+        # otherwise parse RLM_MCP_CONFIG (a standard mcpServers URL map).
+        self.mcp_servers = (
+            mcp_servers if mcp_servers is not None else load_mcp_servers()
+        )
+
         # Token budget
         _max_tok = int(os.environ.get("RLM_MAX_TOKENS", "0"))
         self.max_tokens = _max_tok if _max_tok > 0 else None
@@ -193,9 +200,6 @@ class RLMEngine:
         # IPython REPL (started lazily in single-agent execution)
         self._repl: IPythonREPL | None = None
         self._known_children: set[str] = set()
-
-        # MCP tools exposed as pre-imported IPython skills — module names (populated in run()).
-        self._mcp_skills: list[str] = []
 
         # Turn index (0-based) at the start of the current branch. Used to
         # report "turns since last compaction" when a compaction fires.
@@ -236,25 +240,23 @@ class RLMEngine:
             tool.name == "ipython" for tool in get_active_builtin_tools()
         )
 
-        # Expose any wired MCP tool servers as pre-imported IPython skills (PTC). The
-        # agent calls them from the REPL, so they need ipython; warn if it's disabled.
-        mcp_servers = load_mcp_servers()
-        if mcp_servers and ipython_active:
-            self._mcp_skills = await generate_mcp_skills(mcp_servers, self.session.dir)
+        # Expose any wired MCP tool servers as pre-imported IPython skills (PTC), written into
+        # the session dir; the REPL and prompt read them back from there. The agent calls them
+        # from the REPL, so they need ipython; warn if it's disabled.
+        if self.mcp_servers and ipython_active:
+            skills = await generate_mcp_skills(self.mcp_servers, self.session.dir)
             logger.info(
                 "rlm: exposed %d MCP tool(s) as skills - %s",
-                len(self._mcp_skills),
-                ", ".join(self._mcp_skills),
+                len(skills),
+                ", ".join(skills),
             )
-        elif mcp_servers:
+        elif self.mcp_servers:
             logger.warning(
-                "RLM_MCP_CONFIG is set but the ipython tool is inactive - MCP tools are unavailable"
+                "MCP tool servers are configured but the ipython tool is inactive - MCP tools are unavailable"
             )
 
         if ipython_active:
-            self._repl = IPythonREPL(
-                cwd=self.cwd, session=self.session, mcp_skills=self._mcp_skills
-            )
+            self._repl = IPythonREPL(cwd=self.cwd, session=self.session)
             self._repl.start()
         self._known_children = {p.name for p in self.session.dir.glob("sub-*")}
 
@@ -549,7 +551,7 @@ class RLMEngine:
         system_prompt = build_system_prompt(
             self.cwd,
             str(SKILLS_DIR) if SKILLS_DIR is not None else None,
-            get_installed_skills() + self._mcp_skills,
+            get_installed_skills() + list_skill_modules(self.session.dir),
             messages_path,
             allow_recursion=self.depth < self.max_depth,
             active_tools=active_tools,
