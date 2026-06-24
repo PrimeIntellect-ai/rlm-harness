@@ -39,7 +39,6 @@ async def run(
     queries: list[str],
     *,
     num_results: int | None = None,
-    max_output: int = 8192,
 ) -> str:
     """Run web searches via Exa in parallel and return formatted results.
 
@@ -48,7 +47,6 @@ async def run(
     Args:
         queries: Web search queries.
         num_results: Results per query. Defaults to ``$RLM_SEARCH_NUM_RESULTS`` or 5.
-        max_output: Truncate the combined output to this many chars.
 
     Returns:
         Formatted results (title, URL, highlights) concatenated across queries.
@@ -76,13 +74,4 @@ async def run(
         return f'Results for query "{query}":\n\n{result}'
 
     parts = await asyncio.gather(*[_run_query(query) for query in queries])
-    output = "\n\n---\n\n".join(parts)
-
-    if len(output) > max_output:
-        half = max_output // 2
-        output = (
-            output[:half]
-            + f"\n... [output truncated, {len(output)} chars total] ...\n"
-            + output[-half:]
-        )
-    return output
+    return "\n\n---\n\n".join(parts)
