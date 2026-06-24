@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from rlm.tools.base import ToolContext
-from rlm.tools.bash import BashTool
 from rlm.tools.git_block import (
     find_blocked_command,
     find_blocked_git_log_option,
@@ -264,30 +263,6 @@ def test_python_multi_hop_alias_documented_bypass():
 
 def test_python_syntax_error_does_not_refuse():
     assert find_blocked_in_ipython("def broken(:\n    pass") is None
-
-
-# --- BashTool integration ---
-
-
-def test_bash_tool_allows_git_status():
-    outcome = BashTool().execute({"command": "git --version"}, _ctx())
-    assert outcome.content != REFUSAL
-
-
-def test_bash_tool_refuses_git_log_all():
-    outcome = BashTool().execute({"command": "git log --all"}, _ctx())
-    assert outcome.content == REFUSAL
-
-
-def test_bash_tool_runs_non_git_command():
-    outcome = BashTool().execute({"command": "echo hello"}, _ctx())
-    assert "hello" in outcome.content
-
-
-def test_bash_tool_allow_git_env_var(monkeypatch):
-    monkeypatch.setenv("RLM_ALLOW_GIT", "1")
-    outcome = BashTool().execute({"command": "git log --all"}, _ctx())
-    assert outcome.content != REFUSAL
 
 
 # --- IpythonTool integration ---

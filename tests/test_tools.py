@@ -19,7 +19,7 @@ from conftest import (
 from rlm.engine import RLMEngine
 
 
-async def test_valid_tool(session, register_add_tool):
+async def test_valid_tool(session):
     """Valid tool call: engine dispatches add() and feeds the result back."""
     prompt = "add 2 and 3"
     messages = [
@@ -38,7 +38,7 @@ async def test_valid_tool(session, register_add_tool):
     assert result.turns == 2
 
 
-async def test_multiple_tool_calls(session, register_add_tool):
+async def test_multiple_tool_calls(session):
     """Each tool_call_id in a multi-call assistant message receives a tool result."""
     prompt = "add things"
     messages = [
@@ -60,7 +60,7 @@ async def test_multiple_tool_calls(session, register_add_tool):
     assert sorted(m["tool_call_id"] for m in tool_messages) == ["call_0", "call_1"]
 
 
-async def test_tool_raises(session, register_boom_tool):
+async def test_tool_raises(session):
     """Tool raising from execute() propagates out of engine.run()."""
     prompt = "set off the boom tool"
     messages = [DummyMessage(tool_calls=[DummyToolCall("boom", {})])]
@@ -70,27 +70,3 @@ async def test_tool_raises(session, register_boom_tool):
 
     with pytest.raises(RuntimeError, match="boom"):
         await engine.run(prompt)
-
-
-def test_bash_tool_handles_non_utf8_output():
-    """Bash command stdout containing invalid UTF-8 must not crash the tool.
-
-    `printf '\\xf0'` produces a single 0xf0 byte — a 4-byte UTF-8 lead
-    with no continuation bytes. Without ``errors="replace"`` on the
-    subprocess decode, this raises ``UnicodeDecodeError`` and propagates
-    up as an AgentError that ends the rollout.
-    """
-    from rlm.tools.base import ToolContext
-    from rlm.tools.bash import BashTool
-    from rlm.types import RLMMetrics, TokenUsage
-
-    tool = BashTool()
-    ctx = ToolContext(
-        messages=[],
-        metrics=RLMMetrics(),
-        total_usage=TokenUsage(),
-        last_prompt_tokens=0,
-        exec_timeout=10,
-    )
-    outcome = tool.execute({"command": "printf '\\xf0'"}, ctx)
-    assert "�" in outcome.content
