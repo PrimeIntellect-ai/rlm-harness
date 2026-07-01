@@ -138,6 +138,7 @@ class RLMMetrics:
 
     # Compaction metrics (auto-summarization at a token threshold)
     num_compactions: int = 0
+    has_compacted: int = 0  # 1 if num_compactions > 0, else 0; aggregates as the per-batch fraction of rollouts that compacted
     turns_since_last_compaction: int = 0
     turns_between_compactions_mean: float = 0.0
     compaction_chars_dropped_mean: float = 0.0
@@ -198,6 +199,7 @@ class RLMMetrics:
             self.ipython_input_loc_mean = (
                 self._ipython_input_loc_total / self._ipython_call_count
             )
+        self.has_compacted = 1 if self.num_compactions > 0 else 0
         if self.num_compactions:
             self.turns_between_compactions_mean = (
                 self._turns_between_compactions_total / self.num_compactions
