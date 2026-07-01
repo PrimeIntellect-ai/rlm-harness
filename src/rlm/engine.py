@@ -277,11 +277,6 @@ class RLMEngine:
 
         final_text = ""
         turn = 0
-        # Role of whatever the engine appended to ``messages`` since the
-        # last API call. Drives RLMMetrics.note_assistant_turn's tool-token
-        # attribution: only "tool" appendages count toward total_tool_response_tokens.
-        # ``None`` on the very first turn and after compaction (fresh branch).
-        last_appended_role: str | None = None
 
         for turn in itertools.count():
             # Call LLM
@@ -309,19 +304,6 @@ class RLMEngine:
             self._total_usage.completion_tokens += usage.completion_tokens
             self._last_prompt_tokens = usage.prompt_tokens
 
-            # Record root usage and assistant-visible context for this turn.
-            self._metrics.note_root_usage(
-                self._total_usage.prompt_tokens,
-                self._total_usage.completion_tokens,
-            )
-            self._metrics.note_assistant_turn(
-                usage.prompt_tokens,
-                usage.completion_tokens,
-                prev_appended_role=last_appended_role,
-            )
-
-            # Update metrics
-            self._metrics.turns = turn + 1
             self._metrics.turns_since_last_compaction = (
                 turn + 1 - self._branch_start_turn
             )
@@ -354,7 +336,6 @@ class RLMEngine:
                     messages.append(
                         {"role": "tool", "tool_call_id": tc.id, "content": feedback}
                     )
-                last_appended_role = "tool"
                 continue
 
             if msg.tool_calls and parsed_args[0] is None:
@@ -369,7 +350,6 @@ class RLMEngine:
                 messages.append(
                     {"role": "tool", "tool_call_id": tc.id, "content": feedback}
                 )
-                last_appended_role = "tool"
                 continue
 
             # Token budget check
@@ -415,7 +395,6 @@ class RLMEngine:
                     "content": result,
                 }
             )
-            last_appended_role = "tool"
 
             # Detect new child sessions spawned via rlm()
             self._detect_new_children()
@@ -436,9 +415,6 @@ class RLMEngine:
                     self._metrics.stop_reason = "request_too_large"
                     final_text = "[request body too large]"
                     break
-                # Branch boundary: the next API call's prompt is a fresh
-                # [system, user(framing+summary)], not a continuation.
-                last_appended_role = None
 
         result = RLMResult(
             answer=final_text,

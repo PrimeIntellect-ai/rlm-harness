@@ -68,7 +68,7 @@ class Session:
         self.log({"type": "sub_spawn", "child_dir": child_name, "command": command})
 
     def aggregate_child_metrics(self) -> ChildSessionAggregate:
-        """Walk sub-*/meta.json and bundle their context-token + tool-call stats."""
+        """Walk sub-*/meta.json and bundle their programmatic tool-call stats."""
         aggregate = ChildSessionAggregate()
         for child_dir in self.dir.glob("sub-*"):
             meta_path = child_dir / "meta.json"
@@ -77,16 +77,7 @@ class Session:
                     meta = json.load(f)
             except FileNotFoundError:
                 continue
-            # Missing context_token_stats means the child crashed before
-            # finalize; silently treat as zero contribution so child failures
-            # don't cascade to parent (and grandparent, etc.). Still raise on
-            # genuinely malformed data (corruption rather than absence).
-            ctx_stats = meta.get("context_token_stats", {})
-            if not isinstance(ctx_stats, dict):
-                raise RuntimeError(
-                    f"Malformed context_token_stats in child session meta: {meta_path}"
-                )
-            aggregate.absorb(ctx_stats, ProgrammaticToolCallStats.from_meta(meta))
+            aggregate.absorb(ProgrammaticToolCallStats.from_meta(meta))
         return aggregate
 
     def finalize(
@@ -108,14 +99,11 @@ class Session:
             )
             child = self.aggregate_child_metrics()
 
-            metrics.finalize_current_branch()
-            metrics.apply_child_aggregates(child.context_token_stats)
             metrics.apply_programmatic_tool_call_stats(
                 direct_tool_stats, child.tool_call_stats
             )
 
             meta_update["metrics"] = metrics.to_dict()
-            meta_update["context_token_stats"] = metrics.context_token_stats()
             meta_update["programmatic_tool_call_stats"] = direct_tool_stats.merge(
                 child.tool_call_stats
             ).to_dict()

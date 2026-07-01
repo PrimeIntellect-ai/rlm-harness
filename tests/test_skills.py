@@ -189,7 +189,7 @@ async def test_bash_skill_halt_on_raise(session):
 
 
 async def test_valid_python_skill_metrics(session):
-    """Python-form skill call increments programmatic_tool_calls_python."""
+    """Python-form skill call increments num_ptc_calls."""
     messages = [
         DummyMessage(
             tool_calls=[DummyToolCall("ipython", {"code": "await say(s='hi')"})]
@@ -201,12 +201,12 @@ async def test_valid_python_skill_metrics(session):
 
     await engine.run("say hi")
 
-    assert engine._metrics.programmatic_tool_calls_python == 1
-    assert engine._metrics.programmatic_tool_calls_bash == 0
+    assert engine._metrics.num_ptc_calls == 1
+    assert engine._metrics.num_ptc_calls_bash == 0
 
 
 async def test_valid_bash_skill_metrics(session):
-    """Bash-form skill call (``!say ...``) increments programmatic_tool_calls_bash."""
+    """Bash-form skill call (``!say ...``) increments num_ptc_calls_bash."""
     messages = [
         DummyMessage(tool_calls=[DummyToolCall("ipython", {"code": "!say --s hi"})]),
         DummyMessage(content="ok"),
@@ -216,8 +216,8 @@ async def test_valid_bash_skill_metrics(session):
 
     await engine.run("say hi")
 
-    assert engine._metrics.programmatic_tool_calls_python == 0
-    assert engine._metrics.programmatic_tool_calls_bash == 1
+    assert engine._metrics.num_ptc_calls == 0
+    assert engine._metrics.num_ptc_calls_bash == 1
 
 
 async def test_skill_introspection(session):
