@@ -150,9 +150,9 @@ class RLMMetrics:
 
     # Skill-CLI invocations from inside the ipython REPL (invisible to verifiers:
     # they run within a single tool call and never reach the API proxy).
-    num_ptc_calls: int = 0
+    num_ptc_calls_python: int = 0
     num_ptc_calls_bash: int = 0
-    sub_rlm_num_ptc_calls: int = 0
+    sub_rlm_num_ptc_calls_python: int = 0
     sub_rlm_num_ptc_calls_bash: int = 0
 
     stop_reason: str = ""  # "done", "token_budget", "request_too_large"
@@ -171,9 +171,9 @@ class RLMMetrics:
         direct: ProgrammaticToolCallStats,
         child: ProgrammaticToolCallStats,
     ) -> None:
-        self.num_ptc_calls = direct.python_total
+        self.num_ptc_calls_python = direct.python_total
         self.num_ptc_calls_bash = direct.bash_total
-        self.sub_rlm_num_ptc_calls = child.python_total
+        self.sub_rlm_num_ptc_calls_python = child.python_total
         self.sub_rlm_num_ptc_calls_bash = child.bash_total
 
     def record(self, event: BuiltinMetricEvent) -> None:
