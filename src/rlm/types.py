@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -111,69 +110,35 @@ class ProgrammaticToolCallStats:
         return asdict(self)
 
 
-def _empty_context_token_stats() -> dict[str, int]:
-    return {
-        "session_count": 0,
-        "input_tokens_total": 0,
-        "output_tokens_total": 0,
-        "final_input_tokens_total": 0,
-        "final_output_tokens_total": 0,
-        "branch_count": 0,
-        "branch_input_tokens_sum": 0,
-        "branch_input_tokens_max": 0,
-        "branch_output_tokens_sum": 0,
-        "branch_output_tokens_max": 0,
-        "tool_response_tokens_total": 0,
-    }
-
-
 @dataclass
 class ChildSessionAggregate:
     """Aggregated stats across all recursive descendants of a session."""
 
-    context_token_stats: dict[str, int] = field(
-        default_factory=_empty_context_token_stats
-    )
     tool_call_stats: ProgrammaticToolCallStats = field(
         default_factory=ProgrammaticToolCallStats
     )
 
-    _CONTEXT_TOKEN_SUM_KEYS = (
-        "session_count",
-        "input_tokens_total",
-        "output_tokens_total",
-        "final_input_tokens_total",
-        "final_output_tokens_total",
-        "branch_count",
-        "branch_input_tokens_sum",
-        "branch_output_tokens_sum",
-        "tool_response_tokens_total",
-    )
-    _CONTEXT_TOKEN_MAX_KEYS = ("branch_input_tokens_max", "branch_output_tokens_max")
-
-    def absorb(
-        self,
-        ctx_stats: dict[str, int],
-        tool_stats: ProgrammaticToolCallStats,
-    ) -> None:
+    def absorb(self, tool_stats: ProgrammaticToolCallStats) -> None:
         """Combine a child session's stats into this aggregate."""
-        for key in self._CONTEXT_TOKEN_SUM_KEYS:
-            self.context_token_stats[key] += int(ctx_stats.get(key, 0))
-        for key in self._CONTEXT_TOKEN_MAX_KEYS:
-            self.context_token_stats[key] = max(
-                self.context_token_stats[key],
-                int(ctx_stats.get(key, 0)),
-            )
         self.tool_call_stats = self.tool_call_stats.merge(tool_stats)
 
 
 @dataclass
 class RLMMetrics:
-    """Metrics tracked during an rlm session."""
+    """Metrics tracked during an rlm session.
+
+    Only metrics with no native verifiers-v1 equivalent live here. Per-branch,
+    terminal, and sub-agent token accounting is deliberately absent: verifiers
+    reconstructs branches (compaction + subagents) from the message graph and
+    reports their token counts natively, so tracking it here would double-count.
+    What remains is rlm-internal behaviour verifiers can't see: compaction
+    volume, ipython input size, and programmatic tool calls made from inside the
+    REPL (which never hit the API proxy).
+    """
 
     # Compaction metrics (auto-summarization at a token threshold)
-    compactions_count: int = 0
-    has_compacted: int = 0  # 1 if compactions_count > 0, else 0; aggregates as the per-batch fraction of rollouts that compacted
+    num_compactions: int = 0
+    has_compacted: int = 0  # 1 if num_compactions > 0, else 0; aggregates as the per-batch fraction of rollouts that compacted
     turns_since_last_compaction: int = 0
     turns_between_compactions_mean: float = 0.0
     compaction_chars_dropped_mean: float = 0.0
@@ -183,214 +148,33 @@ class RLMMetrics:
     ipython_input_chars_mean: float = 0.0
     ipython_input_loc_mean: float = 0.0
 
+    # Skill-CLI invocations from inside the ipython REPL (invisible to verifiers:
+    # they run within a single tool call and never reach the API proxy).
+    num_ptc_calls_python: int = 0
+    num_ptc_calls_bash: int = 0
+    sub_rlm_num_ptc_calls_python: int = 0
+    sub_rlm_num_ptc_calls_bash: int = 0
+
+    stop_reason: str = ""  # "done", "token_budget", "request_too_large"
+
     # Internal counters for derived metrics
-    _turns: int = field(default=0, repr=False)
     _ipython_call_count: int = field(default=0, repr=False)
     _ipython_input_chars_total: int = field(default=0, repr=False)
     _ipython_input_loc_total: int = field(default=0, repr=False)
     _turns_between_compactions_total: int = field(default=0, repr=False)
     _compaction_chars_dropped_total: int = field(default=0, repr=False)
     _compaction_summary_chars_total: int = field(default=0, repr=False)
-
-    # Public work/cost token metrics
-    sub_rlm_input_tokens: int = 0
-    sub_rlm_output_tokens: int = 0
-
-    # Root terminal branch context
-    final_input_tokens: int = 0
-    final_output_tokens: int = 0
-
-    # Root branch context exposure
-    branch_input_tokens_mean: float = 0.0
-    branch_input_tokens_max: int = 0
-    branch_output_tokens_mean: float = 0.0
-    branch_output_tokens_max: int = 0
-
-    # Tool-response tokens: sum of bytes the agent ingested via tool results
-    # over the rollout, parent + all descendants, with no double-counting
-    # across turns, branches, or sub-RLMs. Per branch, the parent's own
-    # contribution is (visible_input_at_last_turn -
-    # visible_input_at_first_turn), which strips the system + initial-user
-    # baseline; sub-RLM contributions bubble up via context_token_stats.
-    total_tool_response_tokens: int = 0
-
-    # Skill-CLI invocations from inside the ipython REPL
-    programmatic_tool_calls_python: int = 0
-    programmatic_tool_calls_bash: int = 0
-    sub_rlm_programmatic_tool_calls_python: int = 0
-    sub_rlm_programmatic_tool_calls_bash: int = 0
-
-    stop_reason: str = ""  # "done", "token_budget", "depth_limit", "request_too_large"
-
-    @property
-    def turns(self) -> int:
-        return self._turns
-
-    @turns.setter
-    def turns(self, value: int) -> None:
-        self._turns = value
-
-    # Internal context-token tracker state
-    _retained_completion_tokens: deque[int] = field(default_factory=deque, repr=False)
-    _retained_completion_tokens_total: int = field(default=0, repr=False)
-    _current_branch_input_tokens: int | None = field(default=None, repr=False)
-    _current_branch_output_tokens: int | None = field(default=None, repr=False)
-    # Carry the previous main-loop turn's prompt/completion sizes so the next
-    # turn can derive what was appended in between via prompt-token delta.
-    # Reset to 0 at branch boundaries (compaction / initial branch).
-    _prev_turn_prompt_tokens: int = field(default=0, repr=False)
-    _prev_turn_completion_tokens: int = field(default=0, repr=False)
-    _branch_count: int = field(default=0, repr=False)
-    _branch_input_tokens_sum: int = field(default=0, repr=False)
-    _branch_input_tokens_max: int = field(default=0, repr=False)
-    _branch_output_tokens_sum: int = field(default=0, repr=False)
-    _branch_output_tokens_max: int = field(default=0, repr=False)
-    _root_input_tokens: int = field(default=0, repr=False)
-    _root_output_tokens: int = field(default=0, repr=False)
-    _sub_rlm_count: int = field(default=0, repr=False)
-    _sub_rlm_final_input_tokens: int = field(default=0, repr=False)
-    _sub_rlm_final_output_tokens: int = field(default=0, repr=False)
-    _sub_rlm_branch_count: int = field(default=0, repr=False)
-    _sub_rlm_branch_input_tokens_sum: int = field(default=0, repr=False)
-    _sub_rlm_branch_input_tokens_max: int = field(default=0, repr=False)
-    _sub_rlm_branch_output_tokens_sum: int = field(default=0, repr=False)
-    _sub_rlm_branch_output_tokens_max: int = field(default=0, repr=False)
-    _tool_response_tokens: int = field(default=0, repr=False)
-    _sub_rlm_tool_response_tokens: int = field(default=0, repr=False)
     _sub_rlm_enabled: bool = field(default=False, repr=False)
-
-    def note_root_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
-        self._root_input_tokens = prompt_tokens
-        self._root_output_tokens = completion_tokens
-        self._refresh_derived_metrics()
-
-    def note_assistant_turn(
-        self,
-        prompt_tokens: int,
-        completion_tokens: int,
-        *,
-        prev_appended_role: str | None = None,
-    ) -> None:
-        """Record one main-loop turn's API usage.
-
-        ``prev_appended_role`` names the role of whatever the engine
-        appended to ``messages`` between the previous and current API
-        call (typically ``"tool"``). When it equals ``"tool"``, the
-        prompt-token growth — minus the previous turn's completion
-        (which is the just-appended assistant message) — is attributed
-        to ``_tool_response_tokens``. Pass ``None`` on the first turn
-        of any branch (no preceding turn) to skip the attribution; this
-        naturally excludes the system + initial-user baseline.
-        """
-        if prev_appended_role == "tool":
-            delta = (
-                prompt_tokens
-                - self._prev_turn_prompt_tokens
-                - self._prev_turn_completion_tokens
-            )
-            self._tool_response_tokens += max(0, delta)
-
-        self._prev_turn_prompt_tokens = prompt_tokens
-        self._prev_turn_completion_tokens = completion_tokens
-
-        self._retained_completion_tokens.append(completion_tokens)
-        self._retained_completion_tokens_total += completion_tokens
-
-        turn_total_tokens = prompt_tokens + completion_tokens
-        visible_output_tokens = self._retained_completion_tokens_total
-        visible_input_tokens = max(0, turn_total_tokens - visible_output_tokens)
-
-        self._current_branch_input_tokens = visible_input_tokens
-        self._current_branch_output_tokens = visible_output_tokens
-        self._refresh_derived_metrics()
-
-    def finalize_current_branch(self) -> None:
-        if (
-            self._current_branch_input_tokens is None
-            or self._current_branch_output_tokens is None
-        ):
-            return
-
-        self._branch_count += 1
-        self._branch_input_tokens_sum += self._current_branch_input_tokens
-        self._branch_output_tokens_sum += self._current_branch_output_tokens
-        self._branch_input_tokens_max = max(
-            self._branch_input_tokens_max,
-            self._current_branch_input_tokens,
-        )
-        self._branch_output_tokens_max = max(
-            self._branch_output_tokens_max,
-            self._current_branch_output_tokens,
-        )
-
-        self.final_input_tokens = self._current_branch_input_tokens
-        self.final_output_tokens = self._current_branch_output_tokens
-
-        # Branch boundary: drop prev-turn carry so the next turn's
-        # prompt-token delta isn't attributed across a fresh-context jump.
-        self._prev_turn_prompt_tokens = 0
-        self._prev_turn_completion_tokens = 0
-
-        self._current_branch_input_tokens = None
-        self._current_branch_output_tokens = None
-        self._refresh_derived_metrics()
-
-    def apply_child_aggregates(self, stats: dict[str, int]) -> None:
-        self._sub_rlm_count = stats.get("session_count", 0)
-        self.sub_rlm_input_tokens = stats.get("input_tokens_total", 0)
-        self.sub_rlm_output_tokens = stats.get("output_tokens_total", 0)
-        self._sub_rlm_final_input_tokens = stats.get("final_input_tokens_total", 0)
-        self._sub_rlm_final_output_tokens = stats.get("final_output_tokens_total", 0)
-        self._sub_rlm_branch_count = stats.get("branch_count", 0)
-        self._sub_rlm_branch_input_tokens_sum = stats.get("branch_input_tokens_sum", 0)
-        self._sub_rlm_branch_input_tokens_max = stats.get("branch_input_tokens_max", 0)
-        self._sub_rlm_branch_output_tokens_sum = stats.get(
-            "branch_output_tokens_sum", 0
-        )
-        self._sub_rlm_branch_output_tokens_max = stats.get(
-            "branch_output_tokens_max", 0
-        )
-        self._sub_rlm_tool_response_tokens = stats.get("tool_response_tokens_total", 0)
-        self._refresh_derived_metrics()
 
     def apply_programmatic_tool_call_stats(
         self,
         direct: ProgrammaticToolCallStats,
         child: ProgrammaticToolCallStats,
     ) -> None:
-        self.programmatic_tool_calls_python = direct.python_total
-        self.programmatic_tool_calls_bash = direct.bash_total
-        self.sub_rlm_programmatic_tool_calls_python = child.python_total
-        self.sub_rlm_programmatic_tool_calls_bash = child.bash_total
-
-    def context_token_stats(self) -> dict[str, int]:
-        self._refresh_derived_metrics()
-        return {
-            "session_count": 1 + self._sub_rlm_count,
-            "input_tokens_total": self._root_input_tokens + self.sub_rlm_input_tokens,
-            "output_tokens_total": self._root_output_tokens
-            + self.sub_rlm_output_tokens,
-            "final_input_tokens_total": self.final_input_tokens
-            + self._sub_rlm_final_input_tokens,
-            "final_output_tokens_total": self.final_output_tokens
-            + self._sub_rlm_final_output_tokens,
-            "branch_count": self._branch_count + self._sub_rlm_branch_count,
-            "branch_input_tokens_sum": self._branch_input_tokens_sum
-            + self._sub_rlm_branch_input_tokens_sum,
-            "branch_input_tokens_max": max(
-                self._branch_input_tokens_max,
-                self._sub_rlm_branch_input_tokens_max,
-            ),
-            "branch_output_tokens_sum": self._branch_output_tokens_sum
-            + self._sub_rlm_branch_output_tokens_sum,
-            "branch_output_tokens_max": max(
-                self._branch_output_tokens_max,
-                self._sub_rlm_branch_output_tokens_max,
-            ),
-            "tool_response_tokens_total": (
-                self._tool_response_tokens + self._sub_rlm_tool_response_tokens
-            ),
-        }
+        self.num_ptc_calls_python = direct.python_total
+        self.num_ptc_calls_bash = direct.bash_total
+        self.sub_rlm_num_ptc_calls_python = child.python_total
+        self.sub_rlm_num_ptc_calls_bash = child.bash_total
 
     def record(self, event: BuiltinMetricEvent) -> None:
         if isinstance(event, IpythonExecuted):
@@ -398,15 +182,10 @@ class RLMMetrics:
             self._ipython_input_chars_total += event.input_chars
             self._ipython_input_loc_total += event.input_loc
         elif isinstance(event, CompactionApplied):
-            self.compactions_count += 1
+            self.num_compactions += 1
             self._turns_between_compactions_total += event.turns_since_last_compaction
             self._compaction_chars_dropped_total += event.dropped_chars
             self._compaction_summary_chars_total += event.summary_chars
-            # End the old branch for token accounting, then reset the retained
-            # completion-token window so the next branch starts clean.
-            self.finalize_current_branch()
-            self._retained_completion_tokens.clear()
-            self._retained_completion_tokens_total = 0
         else:
             raise TypeError(f"Unsupported builtin metric event: {type(event)!r}")
 
@@ -420,31 +199,17 @@ class RLMMetrics:
             self.ipython_input_loc_mean = (
                 self._ipython_input_loc_total / self._ipython_call_count
             )
-        self.has_compacted = 1 if self.compactions_count > 0 else 0
-        if self.compactions_count:
+        self.has_compacted = 1 if self.num_compactions > 0 else 0
+        if self.num_compactions:
             self.turns_between_compactions_mean = (
-                self._turns_between_compactions_total / self.compactions_count
+                self._turns_between_compactions_total / self.num_compactions
             )
             self.compaction_chars_dropped_mean = (
-                self._compaction_chars_dropped_total / self.compactions_count
+                self._compaction_chars_dropped_total / self.num_compactions
             )
             self.compaction_summary_chars_mean = (
-                self._compaction_summary_chars_total / self.compactions_count
+                self._compaction_summary_chars_total / self.num_compactions
             )
-
-        if self._branch_count:
-            self.branch_input_tokens_mean = (
-                self._branch_input_tokens_sum / self._branch_count
-            )
-            self.branch_input_tokens_max = self._branch_input_tokens_max
-            self.branch_output_tokens_mean = (
-                self._branch_output_tokens_sum / self._branch_count
-            )
-            self.branch_output_tokens_max = self._branch_output_tokens_max
-
-        self.total_tool_response_tokens = (
-            self._tool_response_tokens + self._sub_rlm_tool_response_tokens
-        )
 
     def to_dict(self) -> dict[str, Any]:
         self._refresh_derived_metrics()
